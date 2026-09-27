@@ -1,14 +1,12 @@
 ---
 name: marineverse
-description: Install and configure the MarineVerse CLI, inspect Globe races, leaderboards and boat positions, and carry out requested boat controls. Use for MarineVerse sailing data and CLI setup.
+description: Install and use the MarineVerse CLI for Globe races, boat controls, your profile, sailing progress, and distance statistics. Use for MarineVerse sailing data and CLI setup or upgrades.
 license: Apache-2.0
-metadata:
-  cli-version: "0.1.0"
 ---
 
 # MarineVerse
 
-Use the MarineVerse CLI for public Globe data and account-authorized boat controls. This file is self-contained: it can bootstrap the CLI even when only a link to this skill was supplied.
+Use the MarineVerse CLI for public Globe data, personal sailing progress and statistics, and account-authorized boat controls. This file is self-contained: it can bootstrap the CLI even when only a link to this skill was supplied.
 
 ## Install this skill when requested
 
@@ -23,7 +21,7 @@ The CLI provides `skills install`, `skills update`, and `skills uninstall` after
 
 ## Bootstrap the executable
 
-1. Check whether `marineverse --version` and `marineverse --help` work. This skill targets CLI 0.1.0; use the installed command's help to confirm options rather than assuming commands exist in another version. Do not install a second copy if a working one is already available.
+1. Check whether `marineverse --version` and `marineverse --help` work. Use the installed command's help to confirm available commands and options. Do not install a second copy if a working one is already available.
 2. For a normal installation, check `node --version` and `npm --version`. Node 24 or newer is required. Use the user's existing Node version manager if available; if Node is missing, guide them through installing a supported runtime. Do not replace their system runtime or require sudo.
 3. Install the published package with `npm install -g @marineverse/cli`, then verify `marineverse --version` and `marineverse --help`. Use the user's requested version if specified. Do not substitute similarly named packages. If global installation is not writable, use a user-owned npm prefix and explain the PATH setup.
 4. If the user supplied a checkout or requested source installation, use `https://github.com/marineverse/marineverse-cli`, honoring their tag/commit. From the checkout, run `npm ci`, then `npm run build`. Verify `node ./bin/marineverse.js --help`. Optionally `npm link` if its destination is writable; otherwise use the absolute path to `bin/marineverse.js` and report that path.
@@ -36,12 +34,12 @@ The skill does not itself install a runtime or executable just by being loaded. 
 - Production is the default for fresh installs; normal commands need no environment flag. API `https://api.marineverse.com`, website `https://www.marineverse.com`, and the public OAuth client ID are built in. If existing settings select another environment and the user wants production, use an explicit `--env production` without changing their settings.
 - Use `--env local` only when the user requests local development. Defaults are API `http://localhost:3000` and website `http://localhost:3005`. The operator supplies that server's separate public client ID. Configure it with `config set local --api-url http://localhost:3000 --web-url http://localhost:3005 --client-id LOCAL_CLIENT_ID`; this selects local. Never substitute the production registration or fall back to production after a local failure.
 - Verify connectivity with `marineverse globe races list --json`, adding an environment flag only when needed. This read does not change boat state.
-- Public races/profiles need no login. For requested private reads or controls, check `auth status --json`; if login is needed, run `auth login` for the same environment and let the user complete the website login/consent. Never request passwords or copy tokens into chat or skill files.
-- Browser login must return to the machine running the CLI. `auth login --no-browser` prints a URL for a browser on that machine; it is not a remote device-code login. If the agent runs remotely, explain this constraint before starting a login that cannot complete.
+- Public races and boat profiles need no login. For requested private reads or controls, check `auth status --json`; if login is needed, run `marineverse login` for the same environment and let the user complete the website login/consent. Login requests all supported permissions. If an older session lacks access to progress or stats, run normal login again; there are no per-feature scope switches. Never request passwords or copy tokens into chat or skill files.
+- Browser login must return to the machine running the CLI. `login --no-browser` prints a URL for a browser on that machine; it is not a remote device-code login. If the agent runs remotely, explain this constraint before starting a login that cannot complete.
 
 ## Use the CLI
 
-Use `--json` for machine-readable results and inspect the process exit status. JSON has `schema_version`, `data`, and `meta`, or an `error` object. Help and version are plain text. Use public race keys and boat UUIDs from returned data; never guess internal database IDs.
+Use `--json` for machine-readable results and inspect the process exit status. JSON has `schema_version`, `data`, and `meta`, or an `error` object. Help and `--version` are plain text; `version --json` supports structured update checks. Use public race keys and boat UUIDs from returned data; never guess internal database IDs.
 
 ```sh
 marineverse globe races list --json
@@ -63,6 +61,29 @@ marineverse globe races open RACE_KEY --no-browser --json
 ```
 
 Omit `--no-browser` when the user wants the page opened on the CLI's machine.
+
+## Profile, progress, and statistics
+
+After login:
+
+```sh
+marineverse profile show --json
+marineverse progress show --json
+marineverse stats distance --json
+marineverse stats distance --boat yacht --json
+```
+
+Profile is read-only. Progress includes tutorial completion, onboarding state, and the next step. Distance statistics are overall totals by boat type, in nautical miles and minutes; they do not provide monthly or daily history. Preserve null totals as unknown, not zero. Use boat types returned by the API rather than guessing them.
+
+For human tables, `progress show --columns name,status` and `stats distance --columns boat,distance,time` select displayed columns. `profile open`, `progress open`, and `stats open` open the matching website pages; use `--no-browser --json` to return a link.
+
+## Version checks and upgrades
+
+`marineverse --version` reads the installed version offline. `marineverse version --json` makes one anonymous npm request to check for updates and reports installation-specific upgrade instructions. A failed check does not mean the installation is current.
+
+When an upgrade is requested, use `marineverse upgrade`. It uses npm or Homebrew for the running installation and prints instructions for source checkouts or temporary npx installs. Check the returned `upgraded` value and verify with `marineverse --version`; a successful exit alone may mean instructions were printed. Older CLI versions may lack these commands; use the existing installation's package manager instead. Do not switch package managers or create a second installation during an upgrade.
+
+After upgrading, update helper-managed skills with `marineverse skills update --agent codex` or `--agent claude`, preserving the original user/project scope. Manually installed or customized skills require comparison with the bundled `skills show` output; do not overwrite them automatically.
 
 ## Requested boat changes
 

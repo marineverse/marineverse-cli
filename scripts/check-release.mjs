@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 
 // Defense in depth: review the exact Git candidates and npm allowlist before release.
@@ -45,7 +47,10 @@ const legalFiles = ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES'];
 assert.deepEqual(manifest.files, ['bin/', 'dist/', 'skills/marineverse/SKILL.md', 'README.md', ...legalFiles]);
 assert.equal(manifest.license, 'Apache-2.0');
 assert.equal(lock.packages[''].license, manifest.license);
-assert.match(readFileSync('src/version.ts', 'utf8'), new RegExp(`VERSION = '${manifest.version.replaceAll('.', '\\.')}'`));
+assert.equal(lock.version, manifest.version);
+assert.equal(lock.packages[''].version, manifest.version);
+const { VERSION } = await import(pathToFileURL(resolve('dist/version.js')).href);
+assert.equal(VERSION, manifest.version);
 const npm = process.env.npm_execpath;
 assert.ok(npm, 'Run through npm run check:release.');
 const [pack] = JSON.parse(execFileSync(process.execPath, [npm, 'pack', '--dry-run', '--ignore-scripts', '--json'], { encoding: 'utf8' }));

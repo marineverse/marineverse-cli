@@ -80,13 +80,13 @@ marineverse version    # Check for a newer release and show upgrade instructions
 marineverse upgrade    # Upgrade using npm or Homebrew
 ```
 
-Available in CLI 0.1.1 and later. To try them from a source checkout, use `node ./bin/marineverse.js version` or `node ./bin/marineverse.js upgrade` after `npm run build`.
+To try them from a source checkout, use `node ./bin/marineverse.js version` or `node ./bin/marineverse.js upgrade` after `npm run build`.
 
 The CLI detects how the running copy was installed and upgrades that installation. npm project installs are updated in their project; global installs retain their prefix. Source checkouts and temporary npx installs receive instructions instead. Homebrew releases may follow npm releases. Version checks make one anonymous request to npm with a three-second timeout; they do not run during other commands. `--json` remains available for agents, with package-manager output on stderr. No automatic upgrades, login, or extra settings are needed.
 
 ## Profile, progress, and stats
 
-Available in CLI 0.1.1 and later. Use normal login for all account features:
+Use normal login for all account features:
 
 ```sh
 marineverse login
@@ -189,6 +189,8 @@ Every API request, including OAuth, identifies itself with `User-Agent: marineve
 Requests time out after 15 seconds. GET requests retry at most twice for HTTP 429/502/503/504, with exponential backoff and jitter. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Network failures, mutations, and token exchanges are not automatically retried. Check state after an ambiguous mutation failure before retrying. Requests do not poll in the background or follow redirects. Only `auth login` and explicit `open` / `view-3d` commands launch a browser. Concurrent token refresh is serialized per credential.
 
 ## Development and release checks
+
+`package.json` is the source of truth for the CLI version. `npm version patch --no-git-tag-version` bumps it and the lockfile; CLI output, request headers, update checks, and installed-skill metadata read that version automatically. The bundled skill uses command help to discover capabilities and does not duplicate the release number.
 
 ```sh
 npm test
