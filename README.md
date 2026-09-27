@@ -72,6 +72,40 @@ node ./bin/marineverse.js config show
 
 `config set` selects the saved environment. Use `config use local` or `--env local` to select it later. No command falls back from localhost to production.
 
+## Version checks and upgrades
+
+```sh
+marineverse --version  # Installed version; works offline
+marineverse version    # Check for a newer release and show upgrade instructions
+marineverse upgrade    # Upgrade using npm or Homebrew
+```
+
+Available in CLI 0.1.1 and later. To try them from a source checkout, use `node ./bin/marineverse.js version` or `node ./bin/marineverse.js upgrade` after `npm run build`.
+
+The CLI detects how the running copy was installed and upgrades that installation. npm project installs are updated in their project; global installs retain their prefix. Source checkouts and temporary npx installs receive instructions instead. Homebrew releases may follow npm releases. Version checks make one anonymous request to npm with a three-second timeout; they do not run during other commands. `--json` remains available for agents, with package-manager output on stderr. No automatic upgrades, login, or extra settings are needed.
+
+## Profile, progress, and stats
+
+Available in CLI 0.1.1 and later. Use normal login for all account features:
+
+```sh
+marineverse login
+marineverse profile show
+marineverse progress show
+marineverse stats distance
+marineverse stats distance --boat yacht --json
+```
+
+`profile show` includes your display name, public UUID, country, time zone, sailing experience, and interests. Progress shows tutorial completion, onboarding state, and your next step. Distance stats show overall totals per boat type in nautical miles and minutes, not monthly history. JSON retains full numeric precision; missing totals stay null.
+
+Use `progress show --columns name,status` or `stats distance --columns boat,distance` to choose table columns. `profile open`, `progress open`, and `stats open` open the matching website pages; add `--no-browser` to print the URL. These website commands use the browser's own session.
+
+Login handles all required permissions. If an older session lacks access to progress or stats, run `marineverse login` again. No extra feature settings are needed.
+
+### Operator rollout
+
+Before releasing this version, deploy the updated server registration task and run `bin/rails marineverse_cli:register` in each target environment. It updates the existing MarineVerse CLI application without changing its public client ID, adding `sailing_cv` to `public globe_read globe_write`. Existing progress and profile API endpoints need no new migration. Users then sign in normally to consent to the full permission set. Update the frontend consent description to include progress, distance, and time statistics.
+
 ## Try it
 
 Public commands require no login, and never send stored credentials:
@@ -150,7 +184,7 @@ The design borrows user configuration and named-environment conventions from [Go
 
 `--json` writes one versioned JSON object to stdout; diagnostics go to stderr. Errors also have a JSON envelope and nonzero exit status. Help/version do not contact the API. Exit codes: 0 success, 2 usage/configuration, 3 authentication, 4 forbidden, 5 missing resource, 6 validation, 7 network/server/rate limit.
 
-Every API request, including OAuth, identifies itself with `User-Agent: marineverse-cli/0.1.0`, `X-MarineVerse-Client: marineverse-cli`, and `X-MarineVerse-Client-Version: 0.1.0`. These are diagnostic labels, not authentication; servers must not trust them for authorization.
+Every API request, including OAuth, identifies itself with `User-Agent: marineverse-cli/<version>`, `X-MarineVerse-Client: marineverse-cli`, and `X-MarineVerse-Client-Version: <version>`, using the installed CLI version. These are diagnostic labels, not authentication; servers must not trust them for authorization.
 
 Requests time out after 15 seconds. GET requests retry at most twice for HTTP 429/502/503/504, with exponential backoff and jitter. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Network failures, mutations, and token exchanges are not automatically retried. Check state after an ambiguous mutation failure before retrying. Requests do not poll in the background or follow redirects. Only `auth login` and explicit `open` / `view-3d` commands launch a browser. Concurrent token refresh is serialized per credential.
 

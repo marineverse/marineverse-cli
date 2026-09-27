@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 assert.ok(process.env.npm_execpath, 'Run through npm run test:package.');
+const { version: expectedVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const temporary = await mkdtemp(join(tmpdir(), 'marineverse-package-'));
 const npm = args => execFileSync(process.execPath, [process.env.npm_execpath, ...args], { encoding: 'utf8' });
 try {
@@ -33,7 +34,7 @@ try {
   const result = JSON.parse(cli(['--env', 'local', '--json', 'globe', 'boats', 'view-3d', 'test-boat', '--no-browser']));
   assert.equal(result.data.url, 'http://localhost:3005/globe/boats-profiles/test-boat/3d');
   assert.equal(result.data.browser_opened, false);
-  assert.equal(cli(['--version']).trim(), '0.1.0');
+  assert.equal(cli(['--version']).trim(), expectedVersion);
   console.log('Packed CLI installs and runs independently of the checkout.');
 } finally {
   await rm(temporary, { recursive: true, force: true });

@@ -8,6 +8,6 @@ export function usage(message: string): never {
   throw new CliError('INVALID_USAGE', message, 2);
 }
 
-export function authRequired(message = 'Run marineverse auth login for this environment.'): never {
+export function authRequired(message = 'Run marineverse login for this environment.'): never {
   throw new CliError('AUTH_REQUIRED', message, 3);
 }

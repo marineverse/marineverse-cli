@@ -4,6 +4,7 @@ import { MarineVerseClient } from './client.js';
 import { CliError, usage } from './errors.js';
 import { human, safe, columnNames, validateColumns, type TableKind } from './output.js';
 import { VERSION } from './version.js';
+import { checkVersion, versionMessage, upgrade, type VersionInfo, type UpgradeResult } from './updates.js';
 import { openBrowser } from './auth.js';
 import { bundledSkill, manageSkill, type SkillAction } from './skills.js';
 
@@ -12,10 +13,26 @@ export interface Services {
   stdout: (message: string) => void;
   stderr: (message: string) => void;
   openBrowser?: (url: string) => Promise<void>;
+  checkVersion?: () => Promise<VersionInfo>;
+  upgrade?: (output: (message: string) => void) => Promise<UpgradeResult>;
 }
 const defaults: Services = { client: environment => new MarineVerseClient(environment), stdout: message => process.stdout.write(message), stderr: message => process.stderr.write(message) };
 
 export function registerPublicCommands(program: Command, services: Services = defaults): void {
+  program.command('upgrade').description('Upgrade this installation using npm or Homebrew')
+    .action(async (_opts, command) => {
+      const result = await (services.upgrade || upgrade)(services.stderr);
+      services.stdout(command.optsWithGlobals().json
+        ? `${JSON.stringify({ schema_version: 1, data: result, meta: {} })}\n`
+        : `${result.message}\n`);
+    });
+  program.command('version').description('Show installed version, check for updates, and show how to upgrade')
+    .action(async (_opts, command) => {
+      const result = await (services.checkVersion || checkVersion)();
+      services.stdout(command.optsWithGlobals().json
+        ? `${JSON.stringify({ schema_version: 1, data: result, meta: {} })}\n`
+        : `${versionMessage(result)}\n`);
+    });
   const tableCommands = new Map<Command, TableKind>();
   const tableCommand = (command: Command, kind: TableKind) => {
     tableCommands.set(command, kind);
@@ -33,7 +50,10 @@ export function registerPublicCommands(program: Command, services: Services = de
   const invoke = async (command: Command, action: (client: MarineVerseClient) => Promise<unknown>) => execute(action)(command.opts(), command);
   const browserCommand = (group: Command, signature: string, description: string, path: (key?: string) => string) => {
     group.command(signature).description(description).option('--no-browser', 'Print the URL without opening a browser')
-      .action(async (key: string | undefined, opts, command: Command) => {
+      .action(async (...args: any[]) => {
+        const command = args.at(-1) as Command;
+        const opts = command.opts();
+        const key = command.registeredArguments.length ? args[0] as string | undefined : undefined;
         if (key !== undefined && !/^[A-Za-z0-9_-]+$/.test(key)) usage('Resource keys may contain letters, numbers, underscores, and hyphens.');
         const options = command.optsWithGlobals() as GlobalOptions;
         const environment = await resolveEnvironment(options);
@@ -73,6 +93,17 @@ export function registerPublicCommands(program: Command, services: Services = de
   registerLogin(program);
   auth.command('status').description('Verify the session and show identity, scopes, and expiry').action(execute(client => client.auth.status()));
   auth.command('logout').description('Revoke credentials and remove the local copy').action(execute(client => client.auth.logout()));
+  const profile = program.command('profile').description('Your MarineVerse profile');
+  profile.command('show').description('Show your profile (login required)').action(execute(client => client.myProfile()));
+  browserCommand(profile, 'open', 'Open your profile on the website', () => '/my-profile');
+  const progress = program.command('progress').description('Your sailing lessons and next step');
+  tableCommand(progress.command('show'), 'tutorials').description('Show tutorial progress (login required)').action(execute(client => client.progress()));
+  browserCommand(progress, 'open', 'Open your sailing progress on the website', () => '/marineverse-cup/my-progress');
+  const stats = program.command('stats').description('Your sailing statistics');
+  tableCommand(stats.command('distance'), 'distance').description('Overall distance and sailing time by boat type (login required)')
+    .option('--boat <type>', 'Show one boat type from the distance table')
+    .action((opts, command) => invoke(command, client => client.distance(opts.boat)));
+  browserCommand(stats, 'open', 'Open your distance statistics on the website', () => '/marineverse-cup/my-distance-stats');
   const skills = program.command('skills').description('Install the bundled MarineVerse skill for Codex or Claude Code');
   skills.command('show').description('Print the self-contained skill, including CLI setup instructions').action(async (_opts, command) => {
     const skill = await bundledSkill();
@@ -112,14 +143,14 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, skills, globe, races, boats]) {
+  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }
 }
 
 export function createProgram(services: Services = defaults): Command {
-  const program = new Command().name('marineverse').description('MarineVerse public races, boat profiles, and authenticated boat controls')
+  const program = new Command().name('marineverse').description('MarineVerse races, boats, profile, sailing progress, and statistics')
     .version(VERSION).option('--env <name>', 'Configured environment').option('--api-url <origin>', 'Override API origin (does not reuse credentials across origins)')
     .option('--json', 'Print a versioned JSON result').option('--no-color', 'Disable color (output is plain by default)')
     .showHelpAfterError().exitOverride().configureOutput({ writeOut: services.stdout, writeErr: () => {} });

@@ -36,10 +36,65 @@ function entry(value: any) {
     boat: boat(value.boat), owner: pick(value.owner, ['uuid', 'name', 'countryCode', 'sailNumber']) };
 }
 
+const tutorialNames = [
+  'yacht_tutorial_basics', 'yacht_tutorial_steering', 'yacht_tutorial_wind_direction', 'yacht_tutorial_sailing_terms',
+  'yacht_tutorial_upwind', 'yacht_tutorial_pos_speed', 'yacht_tutorial_starting_race', 'yacht_tutorial_spinnaker',
+  'hansa303_tutorial_basics', 'dinghy_tutorial_basics', 'dinghy_tutorial_sailing_terms', 'dinghy_tutorial_going_fast',
+  'sailing_ed_self_mastery', 'navigation_rules', 'maneuvering_monohull_sail', 'maneuvering_monohull_power', 'maneuvering_catamaran',
+];
+
+function identity(value: any) {
+  const data = pick(value, ['uuid', 'display_name']);
+  if (typeof data.uuid !== 'string') throw new CliError('INVALID_RESPONSE', 'Profile response is missing its UUID.');
+  return data;
+}
+
+function metric(value: unknown): number | null {
+  if (value == null) return null;
+  // Rails serializes decimal columns as strings, including scientific notation.
+  if (typeof value === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) value = Number(value);
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new CliError('INVALID_RESPONSE', 'Unexpected sailing statistics.');
+  return value;
+}
+
 export class MarineVerseClient {
   readonly auth: Auth;
   constructor(readonly environment: Environment) { this.auth = new Auth(environment); }
   private publicGet(path: string) { return request(`${this.environment.apiUrl}/api/v2/globe${path}`); }
+
+  async myProfile() {
+    const result = object(await this.auth.get('/api/v3/users/me'));
+    return { profile: { ...identity(result), ...pick(result, ['sailing_experience', 'marineverse_interests', 'time_zone',
+      'country_code', 'main_use_case', 'sailing_experience_level']) } };
+  }
+
+  private async sailingProgress() { return object(await this.auth.get('/api/v3/sailing_progress', 'sailing_cv')); }
+
+  async progress() {
+    const result = await this.sailingProgress();
+    const tutorial = object(result.tutorial);
+    return { progress: { ...identity(result), ...pick(result, ['next_step', 'yacht_onboarding_progress', 'dinghy_onboarding_progress', 'finished_race']),
+      tutorials: tutorialNames.filter(name => `${name}_started_at` in tutorial || `${name}_finished_at` in tutorial).map(name => {
+        const started = tutorial[`${name}_started_at`] ?? null;
+        const finished = tutorial[`${name}_finished_at`] ?? null;
+        if ([started, finished].some(value => value !== null && (typeof value !== 'string' || !Number.isFinite(Date.parse(value))))) {
+          throw new CliError('INVALID_RESPONSE', 'Unexpected tutorial timestamps.');
+        }
+        return { name, status: finished ? 'completed' : started ? 'in_progress' : 'not_started', started_at: started, finished_at: finished };
+      }) } };
+  }
+
+  async distance(boatType?: string) {
+    const result = await this.sailingProgress();
+    const stats = object(result.boat_stats);
+    if (boatType !== undefined && !Object.hasOwn(stats, boatType)) usage(`Unknown boat type. Choose from: ${Object.keys(stats).join(', ')}.`);
+    return { ...identity(result), period: 'overall', distance_stats: Object.entries(stats)
+      .filter(([name]) => boatType === undefined || name === boatType)
+      .map(([name, value]) => {
+        const row = object(value);
+        return { boat_type: name, total_distance_nm: metric(row.total_distance_nm), total_time_minutes: metric(row.total_time_minutes) };
+      }) };
+  }
 
   async races() {
     const result = object(await this.publicGet('/races'));

@@ -49,6 +49,7 @@ Desktop.ini
 
 # Internal planning documents and work logs
 /docs/ai_plans/
+/AGENTS.md
 
 # Credentials and local tool state (including explicit in-repo config overrides)
 .marineverse/

@@ -1,7 +1,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -13,11 +13,12 @@ import { Auth, callback } from '../dist/auth.js';
 import { request, retryAfterSeconds } from '../dist/http.js';
 import { callbackPage } from '../dist/callback-page.js';
 
+const { version: expectedVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const storage = process.platform === 'win32' ? 'keyring' : 'file';
 const inheritedEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('MARINEVERSE_')));
 const originalFetch = globalThis.fetch;
 
-let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure;
+let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData;
 const race = { publicKey: 'race-key', name: 'Test Race', state: 'active', entries: [{ position: 1,
   boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }] };
 
@@ -49,10 +50,11 @@ before(async () => {
     if (req.url === '/oauth/token') {
       const params = new URLSearchParams(body);
       if (params.get('grant_type') === 'refresh_token') refreshCount++;
-      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write' });
+      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv' });
     }
     if (req.url === '/oauth/revoke') return send(200, {});
-    if (req.url === '/api/v3/users/me') return send(200, { uuid: 'user-key', display_name: 'Test Sailor', id: 42 });
+    if (req.url === '/api/v3/users/me') return send(200, { uuid: 'user-key', display_name: 'Test Sailor', country_code: 'NZ', time_zone: 'Pacific/Auckland', id: 42, email: 'private@example.test' });
+    if (req.url === '/api/v3/sailing_progress') return send(200, sailingData);
     if (req.url === '/api/v2/globe/races') return send(200, { registration_open_races: [], active_races: [race], finished_races: [] });
     if (req.url === '/api/v2/globe/races/race-key') return send(200, { race });
     if (req.url === '/api/v2/globe/boats/boat-key/profile') return send(200, { boat: currentBoat, races: { active: [race], past: [] } });
@@ -68,7 +70,14 @@ before(async () => {
   const origin = `http://127.0.0.1:${server.address().port}`;
   environment = await setEnvironment('test', origin, origin, 'test-client');
 });
-beforeEach(() => { requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }; refreshCount = 0; failRead = false; failure = undefined; });
+beforeEach(() => {
+  requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }; refreshCount = 0; failRead = false; failure = undefined;
+  sailingData = { uuid: 'user-key', display_name: 'Test Sailor', id: 42, next_step: 'Try a race', finished_race: false,
+    boat_stats: { yacht: { total_distance_nm: 12.34567, total_time_minutes: '90.12345', id: 99 }, dinghy: { total_distance_nm: 0, total_time_minutes: 0 } },
+    tutorial: { yacht_tutorial_basics_started_at: '2026-01-01T12:00:00Z', yacht_tutorial_basics_finished_at: '2026-01-01T12:10:00Z',
+      yacht_tutorial_steering_started_at: '2026-01-02T12:00:00Z', yacht_tutorial_steering_finished_at: null,
+      dinghy_tutorial_basics_started_at: null, dinghy_tutorial_basics_finished_at: null, internal_id: 123 } };
+});
 after(async () => {
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true });
   for (const key of Object.keys(process.env)) if (key.startsWith('MARINEVERSE_')) delete process.env[key];
@@ -81,9 +90,9 @@ async function cli(...args) {
   const code = await run(['node', 'marineverse', ...args], { client: env => new MarineVerseClient(env), stdout: s => stdout += s, stderr: s => stderr += s });
   return { code, stdout, stderr, json: () => JSON.parse(stdout) };
 }
-async function signedIn(expired = false) {
+async function signedIn(expired = false, scopes = ['public', 'globe_read', 'globe_write', 'sailing_cv']) {
   const auth = new Auth(environment);
-  await auth.credentials.lock(() => auth.credentials.write({ userUuid: 'user-key', accessToken: 'access-0', refreshToken: 'refresh-0', scopes: ['public', 'globe_read', 'globe_write'], expiresAt: Date.now() + (expired ? -100 : 7200_000) }, storage));
+  await auth.credentials.lock(() => auth.credentials.write({ userUuid: 'user-key', accessToken: 'access-0', refreshToken: 'refresh-0', scopes, expiresAt: Date.now() + (expired ? -100 : 7200_000) }, storage));
   return auth;
 }
 
@@ -92,7 +101,7 @@ test('help and version work offline', async () => {
   assert.equal(bare.code, 0);
   assert.match(bare.stdout, /Usage: marineverse/);
   assert.equal(bare.stderr, '');
-  for (const args of [['help'], ['help', 'globe'], ['globe'], ['globe', 'races'], ['globe', 'boats'], ['globe', 'help', 'boats'], ['auth'], ['config'], ['skills']]) {
+  for (const args of [['help'], ['help', 'globe'], ['globe'], ['globe', 'races'], ['globe', 'boats'], ['globe', 'help', 'boats'], ['auth'], ['config'], ['skills'], ['profile'], ['progress'], ['stats']]) {
     const group = await cli(...args);
     assert.equal(group.code, 0, args.join(' '));
     assert.match(group.stdout, /Usage: marineverse/);
@@ -101,7 +110,7 @@ test('help and version work offline', async () => {
   }
   assert.match((await cli('--help')).stdout, /globe/);
   assert.match((await cli('globe', 'boats', '--help')).stdout, /set-heading/);
-  assert.equal((await cli('--version')).stdout.trim(), '0.1.0');
+  assert.equal((await cli('--version')).stdout.trim(), expectedVersion);
   assert.equal(requests.length, 0);
 });
 test('top-level login uses the same options and implementation as auth login', async () => {
@@ -117,6 +126,98 @@ test('top-level login uses the same options and implementation as auth login', a
     assert.equal(typeof captured.announce, 'function');
     assert.equal(JSON.parse(output).data.logged_in, true);
   }
+  assert.equal(requests.length, 0);
+});
+test('profile, progress and distance use authenticated v3 reads with safe fields and useful tables', async () => {
+  await signedIn();
+  const profile = await cli('profile', 'show', '--json');
+  assert.equal(profile.code, 0);
+  assert.equal(profile.json().data.profile.country_code, 'NZ');
+  assert.equal(profile.json().data.profile.time_zone, 'Pacific/Auckland');
+  assert.equal(profile.json().data.profile.id, undefined);
+  assert.equal(profile.json().data.profile.email, undefined);
+  assert.match((await cli('profile', 'show')).stdout, /display_name: Test Sailor/);
+  const progress = await cli('progress', 'show', '--json');
+  assert.equal(progress.code, 0);
+  assert.equal(progress.json().data.progress.next_step, 'Try a race');
+  assert.deepEqual(progress.json().data.progress.tutorials.map(row => row.status), ['completed', 'in_progress', 'not_started']);
+  assert.equal(progress.json().data.progress.id, undefined);
+  const table = await cli('progress', 'show', '--columns', 'status,name');
+  assert.match(table.stdout, /STATUS\s+TUTORIAL/);
+  const distance = await cli('stats', 'distance', '--boat', 'yacht', '--json');
+  assert.equal(distance.code, 0);
+  assert.deepEqual(distance.json().data.distance_stats, [{ boat_type: 'yacht', total_distance_nm: 12.34567, total_time_minutes: 90.12345 }]);
+  assert.equal(distance.json().data.period, 'overall');
+  const totals = await cli('stats', 'distance', '--columns', 'boat,distance,time');
+  assert.match(totals.stdout, /DISTANCE \(nm\)/);
+  assert.match(totals.stdout, /TIME \(min\)/);
+  assert.match(totals.stdout, /dinghy\s+0\s+0/);
+  assert.ok(requests.every(r => r.method === 'GET' && r.path.startsWith('/api/v3/') && r.authorization === 'Bearer access-0'));
+  assert.doesNotMatch(JSON.stringify([profile.json(), progress.json(), distance.json()]), /private@example|internal_id|access-0|refresh-0/);
+});
+test('statistics accept Rails decimal strings and reject malformed metrics', async () => {
+  await signedIn();
+  for (const [value, expected] of [['0.9012345e2', 90.12345], ['0.0', 0], ['.5', 0.5], [12.5, 12.5], [null, null]]) {
+    sailingData.boat_stats.yacht.total_time_minutes = value;
+    const result = await cli('stats', 'distance', '--boat', 'yacht', '--json');
+    assert.equal(result.code, 0);
+    assert.equal(result.json().data.distance_stats[0].total_time_minutes, expected);
+  }
+  for (const value of ['', ' ', 'NaN', 'Infinity', '1e999', '-1', '0x10', '12 minutes', true, [], {}]) {
+    sailingData.boat_stats.yacht.total_time_minutes = value;
+    const result = await cli('stats', 'distance', '--json');
+    assert.equal(result.json().error.code, 'INVALID_RESPONSE');
+  }
+});
+test('old sessions can read their profile and are told to log in again for progress and stats', async () => {
+  const auth = await signedIn(false, ['public', 'globe_read', 'globe_write']);
+  assert.equal((await cli('profile', 'show')).code, 0);
+  requests = [];
+  for (const args of [['progress', 'show'], ['stats', 'distance']]) {
+    const result = await cli(...args, '--json');
+    assert.equal(result.code, 3);
+    assert.equal(result.json().error.code, 'AUTH_REQUIRED');
+    assert.match(result.json().error.message, /marineverse login again/);
+    assert.doesNotMatch(result.json().error.message, /--with|--scope/);
+  }
+  assert.equal(requests.length, 0);
+  assert.equal((await auth.credentials.read()).accessToken, 'access-0');
+  await auth.credentials.lock(() => auth.credentials.remove());
+  for (const args of [['profile', 'show'], ['progress', 'show'], ['stats', 'distance']]) assert.equal((await cli(...args)).code, 3);
+});
+test('account browser commands open the selected website without accessing credentials', async () => {
+  for (const [group, path] of [['profile', '/my-profile'], ['progress', '/marineverse-cup/my-progress'], ['stats', '/marineverse-cup/my-distance-stats']]) {
+    let output = '', opened;
+    const code = await run(['node', 'marineverse', group, 'open', '--json'], {
+      client: assert.fail, stdout: s => output += s, stderr: assert.fail, openBrowser: async url => { opened = url; },
+    });
+    assert.equal(code, 0);
+    assert.equal(opened, `${environment.webUrl}${path}`);
+    assert.equal(JSON.parse(output).data.browser_opened, true);
+    const production = await cli('--env', 'production', group, 'open', '--no-browser', '--json');
+    assert.equal(production.json().data.url, `https://www.marineverse.com${path}`);
+    assert.equal(production.json().data.browser_opened, false);
+  }
+  assert.equal(requests.length, 0);
+});
+test('account reads preserve refresh, forbidden and malformed-response behavior', async () => {
+  await signedIn(true);
+  assert.equal((await cli('progress', 'show')).code, 0);
+  assert.equal(refreshCount, 1);
+  failure = 403;
+  const denied = await cli('stats', 'distance', '--json');
+  assert.equal(denied.code, 4);
+  assert.equal(denied.json().error.code, 'FORBIDDEN');
+  failure = undefined;
+  sailingData.boat_stats.yacht.total_distance_nm = -1;
+  assert.equal((await cli('stats', 'distance', '--json')).json().error.code, 'INVALID_RESPONSE');
+  sailingData.boat_stats.yacht.total_distance_nm = null;
+  assert.equal((await cli('stats', 'distance', '--json')).json().data.distance_stats[0].total_distance_nm, null);
+  assert.equal((await cli('stats', 'distance', '--boat', '__proto__')).code, 2);
+  sailingData.tutorial.yacht_tutorial_basics_started_at = { id: 5 };
+  assert.equal((await cli('progress', 'show', '--json')).json().error.code, 'INVALID_RESPONSE');
+  requests = [];
+  assert.equal((await cli('stats', 'distance', '--columns', 'password')).code, 2);
   assert.equal(requests.length, 0);
 });
 test('production defaults include the public client ID without changing the selected environment', async () => {
@@ -251,9 +352,9 @@ test('all API requests identify the CLI and its version', async () => {
   assert.ok(requests.some(r => r.path === '/oauth/token'));
   assert.ok(requests.some(r => r.path === '/oauth/revoke'));
   for (const { headers } of requests) {
-    assert.equal(headers['user-agent'], 'marineverse-cli/0.1.0');
+    assert.equal(headers['user-agent'], `marineverse-cli/${expectedVersion}`);
     assert.equal(headers['x-marineverse-client'], 'marineverse-cli');
-    assert.equal(headers['x-marineverse-client-version'], '0.1.0');
+    assert.equal(headers['x-marineverse-client-version'], expectedVersion);
   }
 });
 test('JSON errors use nonzero codes without contaminating stdout', async () => {
@@ -329,6 +430,7 @@ test('browser login uses frontend consent with S256 then exchanges code and stor
   assert.equal(authorized.origin, environment.webUrl);
   assert.equal(authorized.pathname, '/oauth/authorize');
   assert.equal(authorized.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv');
   const exchange = new URLSearchParams(requests.find(r => r.path === '/oauth/token').body);
   assert.equal(exchange.get('code'), 'one-use-code');
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), authorized.searchParams.get('code_challenge'));

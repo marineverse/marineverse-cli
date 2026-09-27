@@ -86,7 +86,7 @@ export class Auth {
     try {
       const verifier = randomBytes(32).toString('base64url');
       const url = new URL('/oauth/authorize', this.environment.webUrl);
-      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write',
+      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write sailing_cv',
         redirect_uri: listener.redirectUri, state: listener.state, code_challenge_method: 'S256',
         code_challenge: createHash('sha256').update(verifier).digest('base64url') }).toString();
       options.announce(url.toString());
@@ -119,8 +119,11 @@ export class Auth {
     });
   }
 
-  async get(path: string): Promise<any> {
+  async get(path: string, requiredScope?: string): Promise<any> {
     const token = await this.accessToken();
+    if (requiredScope && !(await this.credentials.read())?.scopes.includes(requiredScope)) {
+      throw new CliError('AUTH_REQUIRED', 'Your login needs permission for sailing progress and stats. Run marineverse login again for this environment.', 3);
+    }
     try { return await request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } }); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== 'AUTH_REQUIRED') throw error;
