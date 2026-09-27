@@ -1,0 +1,69 @@
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+junit.xml
+*.lcov
+*.tsbuildinfo
+*.tgz
+.npm/
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+/tmp/
+/temp/
+.tmp/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.npmrc
+!.npmrc.example
+*.local
+
+# Runtime logs
+*.log
+
+# Local OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+._*
+
+# Local editor state, swaps, and backup files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+*.bak
+
+# Internal planning documents and work logs
+/docs/ai_plans/
+
+# Credentials and local tool state (including explicit in-repo config overrides)
+.marineverse/
+credentials/
+auth.json
+tokens.json
+.agents/
+.codex/
+.claude/
+.claude.json
+.mcp.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Keep source skills/, package-lock.json, LICENSE, and NOTICE in Git.
