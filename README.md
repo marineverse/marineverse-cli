@@ -2,7 +2,20 @@
 
 Browse Globe races and public boat profiles, sign in through the MarineVerse website, and control boats you own or crew.
 
-This is a V1 preview. The public production OAuth client ID is included. Production acceptance testing, public repository publication, and npm distribution remain separate release steps.
+This is a V1 preview. The public production OAuth client ID is included.
+
+## Install from npm
+
+Use Node 24 or newer:
+
+```sh
+npm install -g @marineverse/cli
+marineverse --help
+marineverse globe races list
+marineverse login
+```
+
+Public races and boat profiles do not require login. In the checkout examples below, replace `node ./bin/marineverse.js` with `marineverse` when using the installed package.
 
 ## Set up with your agent
 
@@ -10,15 +23,15 @@ Give Codex or Claude Code [the MarineVerse skill](skills/marineverse/SKILL.md) a
 
 > Install this MarineVerse skill for yourself, then use it to install and configure the MarineVerse CLI. Verify it by listing public Globe races. Let me complete browser login if my next task needs an account.
 
-The skill includes setup instructions and works before the CLI is installed. It uses an existing checkout or the official GitHub repository, so npm publication is not a prerequisite. It preserves existing configuration and does not change boats during setup. Node 24+ and access to the repository are required; the agent will report missing prerequisites.
+The skill includes setup instructions and works before the CLI is installed. It installs the published npm package, or uses an existing checkout when requested. It preserves existing configuration and does not change boats during setup. Node 24+ is required; the agent will report missing prerequisites.
 
-After this branch is published, the shareable skill URL will be:
+The shareable skill URL is:
 
 ```text
 https://raw.githubusercontent.com/marineverse/marineverse-cli/master/skills/marineverse/SKILL.md
 ```
 
-For a stable release, replace `master` with its tag or commit. Until publication, give your agent the local `skills/marineverse/SKILL.md` file and checkout path.
+For a stable release, replace `master` with its tag or commit. You can also give your agent the local `skills/marineverse/SKILL.md` file and checkout path.
 
 Once the CLI is available, these helpers install the bundled skill into the current user's agent directory:
 
