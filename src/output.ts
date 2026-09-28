@@ -40,6 +40,18 @@ function selected(kind: TableKind, columns: [string, (row: any) => unknown][], n
 
 export function human(data: any, columns?: string[]): string {
   const paragraphs = (value: string) => value.split('\n').map(safe).join('\n');
+  const postTable = (posts: any[]) => table(posts, [['BOARD', p => p.board_slug], ['POST', p => p.slug], ['TITLE', p => p.title], ['STATUS', p => p.status], ['VOTES', p => p.vote_count], ['COMMENTS', p => p.comment_count], ['UPVOTED', p => p.upvoted_by_me]]);
+  const pagination = (value: any) => `Page ${safe(value.current_page)} of ${safe(value.total_pages)} · ${safe(value.total_entries)} results`;
+  const commentText = (comment: any): string => `${safe(comment.author?.name)} · ${safe(comment.uuid)} · ${safe(comment.vote_count)} votes${comment.is_pinned ? ' · pinned' : ''}\n${paragraphs(comment.content)}${comment.replies?.length ? `\n\nReplies:\n${comment.replies.map(commentText).join('\n\n')}` : ''}`;
+  if (data.boards) return table(data.boards, [['BOARD', b => b.slug], ['NAME', b => b.name], ['POSTS', b => b.post_count], ['DESCRIPTION', b => b.description]]);
+  if (data.roadmap) return [['planned', 'Planned'], ['in_progress', 'In progress'], ['complete', 'Complete']].map(([key, name]) => `${name}\n${postTable(data.roadmap[key!])}`).join('\n\n');
+  if (data.posts) return `${data.name ? `${safe(data.name)}\n` : ''}${postTable(data.posts)}${data.current_page === undefined ? '' : `\n${pagination(data)}`}`;
+  if (data.feed) return `${safe(data.feed.board.name)} — Recent activity\n${data.feed.entries.map((entry: any) => `${safe(entry.title)} · ${safe(entry.created_words)}\n${safe(entry.description)}\n${safe(entry.post_link.board_slug)}/${safe(entry.post_link.slug)}`).join('\n\n') || '(none)'}\n${pagination(data.feed)}`;
+  if (data.post) {
+    const post = data.post;
+    return `${data.message ? `${safe(data.message)}\n` : ''}${safe(post.title)}\nPost: ${safe(post.slug)} · UUID: ${safe(post.uuid)}\nStatus: ${safe(post.status)} · Votes: ${safe(post.vote_count)} · Comments: ${safe(post.comment_count)}\nBy ${safe(post.author?.name)}\n\n${paragraphs(post.description)}${post.upvoted_by ? `\n\nUpvoted by: ${post.upvoted_by.map((user: any) => safe(user.name)).join(', ') || '(none)'}` : ''}${post.merged_into_post ? `\n\nMerged into: ${safe(post.merged_into_post.board_slug || '')}/${safe(post.merged_into_post.slug)} — ${safe(post.merged_into_post.title)}` : ''}${post.similar_posts?.length ? `\n\nRelated posts\n${postTable(post.similar_posts)}` : ''}${post.comments ? `\n\nComments\n${post.comments.map(commentText).join('\n\n') || '(none)'}` : ''}`;
+  }
+  if (data.comment) return `${safe(data.message)}\n${commentText(data.comment)}`;
   if (data.article) return `${safe(data.article.title)} (${safe(data.article.uuid)})\n\n${paragraphs(data.article.content)}`;
   if (data.answer) return paragraphs(data.answer);
   if (data.articles) return data.articles.length

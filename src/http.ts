@@ -9,7 +9,7 @@ export function retryAfterSeconds(value: string | null, now = Date.now()): numbe
   return Number.isFinite(seconds) ? Math.max(0, Math.ceil(seconds)) : undefined;
 }
 
-export async function request(url: string, options: RequestInit = {}, timeoutMs = 15_000): Promise<any> {
+export async function request(url: string, options: RequestInit = {}, timeoutMs = 15_000, retryReads = true): Promise<any> {
   const method = options.method || 'GET';
   const headers = new Headers(options.headers);
   headers.set('Accept', 'application/json');
@@ -24,7 +24,7 @@ export async function request(url: string, options: RequestInit = {}, timeoutMs 
       throw new CliError('NETWORK_ERROR', method === 'GET' ? 'Request failed or timed out.' : 'Request failed; the operation may have completed. Read back state before retrying.');
     }
     const retryAfter = retryAfterSeconds(response.headers.get('retry-after'));
-    if (method === 'GET' && attempt < 2 && [429, 502, 503, 504].includes(response.status)) {
+    if (retryReads && method === 'GET' && attempt < 2 && [429, 502, 503, 504].includes(response.status)) {
       if (retryAfter === undefined || retryAfter <= 5) {
         await response.body?.cancel();
         const backoff = (2 ** attempt) * 500 + randomInt(0, 251);

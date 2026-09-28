@@ -21,6 +21,12 @@ const originalFetch = globalThis.fetch;
 let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData;
 const race = { publicKey: 'race-key', name: 'Test Race', state: 'active', entries: [{ position: 1,
   boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }] };
+const feedbackPost = { uuid: 'post-uuid', slug: 'better-docking', board_slug: 'sailing', title: 'Better docking', description: 'More practice.\n\nIn strong wind.',
+  status: 'planned', vote_count: 2, comment_count: 1, upvoted_by_me: true, id: 99,
+  author: { name: 'Test Sailor', uuid: 'profile-uuid', email: 'private@example.test', id: 88 },
+  upvoted_by: [{ name: 'A voter', id: 77 }], similar_posts: [{ slug: 'related', board_slug: 'sailing', title: 'Related idea', vote_count: 3 }],
+  comments: [{ uuid: 'comment-uuid', content: 'Great idea!', author: { name: 'A commenter', id: 66 }, vote_count: 1, replies: [
+    { uuid: 'reply-uuid', content: 'Thanks.', author: { name: 'A reply author' }, vote_count: 0 }] }] };
 
 before(async () => {
   for (const key of Object.keys(inheritedEnvironment)) delete process.env[key];
@@ -50,11 +56,27 @@ before(async () => {
     if (req.url === '/oauth/token') {
       const params = new URLSearchParams(body);
       if (params.get('grant_type') === 'refresh_token') refreshCount++;
-      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv kb_read ai_ask' });
+      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write' });
     }
     if (req.url === '/oauth/revoke') return send(200, {});
     if (req.url === '/api/v3/users/me') return send(200, { uuid: 'user-key', display_name: 'Test Sailor', country_code: 'NZ', time_zone: 'Pacific/Auckland', id: 42, email: 'private@example.test' });
     if (req.url === '/api/v3/sailing_progress') return send(200, sailingData);
+    if (req.url.startsWith('/api/v3/feedback/')) {
+      const path = new URL(req.url, 'http://localhost').pathname;
+      const pagination = { current_page: 1, total_pages: 2, total_entries: 12, per_page: 10 };
+      if (req.method !== 'GET') {
+        if (path.endsWith('/upvote') || path.endsWith('/downvote')) return send(200, { message: 'Vote saved', vote_count: 3, id: 99 });
+        if (path.includes('/comments')) return send(200, req.method === 'DELETE' ? { message: 'Comment deleted successfully' }
+          : { message: 'Comment saved', comment: { ...feedbackPost.comments[0], content: JSON.parse(body).content } });
+        return send(200, { message: 'Post saved', post: feedbackPost });
+      }
+      if (path.endsWith('/boards')) return send(200, { boards: [{ slug: 'sailing', name: 'Sailing', uuid: 'board-uuid', post_count: 12, id: 99 }] });
+      if (path.endsWith('/roadmap')) return send(200, { planned: [feedbackPost], in_progress: [], complete: [] });
+      if (path.endsWith('/feed')) return send(200, { board: { name: 'Sailing' }, entries: [{ type: 'post', title: 'New post', description: 'Details', created_words: 'one day ago', post_link: { board_slug: 'sailing', slug: 'better-docking' } }], ...pagination });
+      if (path.endsWith('/posts')) return send(200, { name: 'Sailing', posts: [feedbackPost], ...pagination });
+      if (path.endsWith('/suggested')) return send(200, { posts: [feedbackPost] });
+      return send(200, feedbackPost);
+    }
     if (req.url === '/api/v3/knowledge_base/search') return send(200, { articles: [{ uuid: '00000000-0000-4000-8000-000000000001', title: 'Reefing', excerpt: 'Reduce sail.', relevance: 0.9, id: 99 }], tokens: { consumed: 7, remaining: 93 } });
     if (req.url === '/api/v3/knowledge_base/00000000-0000-4000-8000-000000000001') return send(200, { article: { uuid: '00000000-0000-4000-8000-000000000001', title: 'Reefing', content: 'Reduce sail.\n\nKeep control.', id: 99 } });
     if (req.url === '/api/v3/ai/ask') return send(200, { answer: 'Ease the sheet.\nThen reef.', interaction_uuid: '00000000-0000-4000-8000-000000000002', tokens: { consumed: 20, remaining: 73 }, user_id: 99 });
@@ -97,11 +119,104 @@ async function cli(...args) {
   const code = await run(['node', 'marineverse', ...args], { client: env => new MarineVerseClient(env), stdout: s => stdout += s, stderr: s => stderr += s });
   return { code, stdout, stderr, json: () => JSON.parse(stdout) };
 }
-async function signedIn(expired = false, scopes = ['public', 'globe_read', 'globe_write', 'sailing_cv', 'kb_read', 'ai_ask']) {
+async function signedIn(expired = false, scopes = ['public', 'globe_read', 'globe_write', 'sailing_cv', 'kb_read', 'ai_ask', 'feedback_read', 'feedback_write']) {
   const auth = new Auth(environment);
   await auth.credentials.lock(() => auth.credentials.write({ userUuid: 'user-key', accessToken: 'access-0', refreshToken: 'refresh-0', scopes, expiresAt: Date.now() + (expired ? -100 : 7200_000) }, storage));
   return auth;
 }
+
+test('feedback browsing works anonymously and preserves details with only public fields', async () => {
+  await new Auth(environment).credentials.remove();
+  for (const args of [['feedback', 'boards', 'list'], ['feedback', 'roadmap'], ['feedback', 'posts', 'list', 'sailing'], ['feedback', 'posts', 'show', 'sailing', 'better-docking'], ['feedback', 'boards', 'feed', 'sailing']]) {
+    const response = await cli(...args, '--json');
+    assert.equal(response.code, 0, response.stderr);
+    assert.doesNotMatch(response.stdout, /private@example|"id"|"user_id"/);
+    assert.equal(requests.at(-1).authorization, undefined);
+  }
+  const detail = await cli('feedback', 'posts', 'show', 'sailing', 'better-docking');
+  for (const text of ['More practice.\n\nIn strong wind.', 'A voter', 'Related idea', 'Great idea!', 'Thanks.', 'comment-uuid']) assert.ok(detail.stdout.includes(text), text);
+  const listing = await cli('feedback', 'posts', 'list', 'sailing');
+  assert.match(listing.stdout, /Page 1 of 2/);
+});
+
+test('feedback suggestions work anonymously or signed in and are never automatically retried', async () => {
+  for (const loggedIn of [false, true]) {
+    if (loggedIn) await signedIn();
+    requests = [];
+    const result = await cli('feedback', 'posts', 'suggested', 'sailing', '--title', 'Better docking', '--description', 'Wind & waves', '--json');
+    assert.equal(result.code, 0);
+    assert.equal(result.json().data.posts[0].slug, 'better-docking');
+    const url = new URL(requests[0].path, environment.apiUrl);
+    assert.equal(url.searchParams.get('description'), 'Wind & waves');
+    assert.equal(Boolean(requests[0].authorization), loggedIn);
+    requests = [];
+    failure = 503;
+    assert.notEqual((await cli('feedback', 'posts', 'suggested', 'sailing', '--title', 'Better docking')).code, 0);
+    assert.equal(requests.length, 1);
+    failure = undefined;
+  }
+});
+
+test('feedback sends encoded filters, pagination and existing OAuth identity', async () => {
+  await signedIn();
+  assert.equal((await cli('feedback', 'posts', 'list', 'sailing', '--search', 'wind & waves', '--sort', 'new', '--filter', 'mine', '--page', '2')).code, 0);
+  const url = new URL(requests.at(-1).path, environment.apiUrl);
+  assert.equal(url.searchParams.get('search'), 'wind & waves');
+  assert.equal(url.searchParams.get('page'), '2');
+  assert.equal(url.searchParams.get('filter'), 'mine');
+  assert.equal(requests.at(-1).authorization, 'Bearer access-0');
+  assert.equal((await cli('feedback', 'boards', 'feed', 'sailing', '--types', 'comments', '--page', '2')).code, 0);
+  assert.match(requests.at(-1).path, /posts=false&comments=true&votes=false/);
+  assert.equal((await cli('feedback', 'roadmap', '--filter', 'upvoted_by_me', '--search', 'docking')).code, 0);
+});
+
+test('feedback writes use the expected verbs, payloads and one request without automatic retries', async () => {
+  await signedIn();
+  const cases = [
+    [['posts', 'create', 'sailing', '--title', 'Idea', '--description', 'Details'], 'POST', '/posts', { board_slug: 'sailing', title: 'Idea', description: 'Details' }],
+    [['posts', 'update', 'sailing', 'better-docking', '--title', 'Idea', '--description', 'Details'], 'PATCH', '/posts/sailing/better-docking', { title: 'Idea', description: 'Details' }],
+    [['posts', 'upvote', 'sailing', 'better-docking'], 'POST', '/posts/sailing/better-docking/upvote', {}],
+    [['posts', 'unvote', 'sailing', 'better-docking'], 'POST', '/posts/sailing/better-docking/downvote', {}],
+    [['comments', 'create', 'post-uuid', '--content', 'Reply', '--reply-to', 'comment-uuid'], 'POST', '/comments', { post_uuid: 'post-uuid', content: 'Reply', parent_comment_uuid: 'comment-uuid' }],
+    [['comments', 'update', 'comment-uuid', '--content', 'Edited'], 'PATCH', '/comments/comment-uuid', { content: 'Edited' }],
+    [['comments', 'delete', 'comment-uuid'], 'DELETE', '/comments/comment-uuid', {}],
+    [['comments', 'upvote', 'comment-uuid'], 'POST', '/comments/comment-uuid/upvote', {}],
+    [['comments', 'unvote', 'comment-uuid'], 'POST', '/comments/comment-uuid/downvote', {}],
+  ];
+  for (const [args, method, path, body] of cases) {
+    requests = [];
+    const response = await cli('feedback', ...args, '--json');
+    assert.equal(response.code, 0, response.stderr);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, `/api/v3/feedback${path}`);
+    assert.equal(requests[0].method, method);
+    assert.equal(requests[0].authorization, 'Bearer access-0');
+    assert.deepEqual(JSON.parse(requests[0].body), body);
+    failure = 503;
+    requests = [];
+    assert.notEqual((await cli('feedback', ...args)).code, 0);
+    assert.equal(requests.length, 1);
+    failure = undefined;
+  }
+});
+
+test('feedback validates before network access, requires normal login, and exposes offline help and links', async () => {
+  await signedIn();
+  for (const args of [['posts', 'list', 'sailing', '--page', '0'], ['posts', 'list', 'sailing', '--sort', 'wrong'], ['posts', 'show', '../private', 'post'], ['comments', 'create', 'post', '--content', ' '], ['boards', 'feed', 'sailing', '--types', 'wrong']]) {
+    assert.equal((await cli('feedback', ...args)).code, 2);
+  }
+  assert.equal(requests.length, 0);
+  await signedIn(false, ['public']);
+  const denied = await cli('feedback', 'posts', 'upvote', 'sailing', 'post');
+  assert.equal(denied.code, 3);
+  assert.match(denied.stderr, /marineverse login/);
+  await new Auth(environment).credentials.remove();
+  assert.equal((await cli('feedback', 'roadmap', '--filter', 'mine')).code, 3);
+  for (const args of [[], ['boards'], ['posts'], ['comments']]) assert.equal((await cli('feedback', ...args)).code, 0);
+  const opened = await cli('feedback', 'posts', 'open', 'sailing', 'better-docking', '--no-browser', '--json');
+  assert.equal(opened.json().data.url, `${environment.webUrl}/feedback/sailing/better-docking`);
+  assert.equal(requests.length, 0);
+});
 
 test('knowledge base and AI commands use authenticated requests and preserve readable paragraphs', async () => {
   await signedIn();
@@ -534,7 +649,7 @@ test('browser login uses frontend consent with S256 then exchanges code and stor
   assert.equal(authorized.origin, environment.webUrl);
   assert.equal(authorized.pathname, '/oauth/authorize');
   assert.equal(authorized.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask');
+  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write');
   const exchange = new URLSearchParams(requests.find(r => r.path === '/oauth/token').body);
   assert.equal(exchange.get('code'), 'one-use-code');
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), authorized.searchParams.get('code_challenge'));

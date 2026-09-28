@@ -102,6 +102,44 @@ Use `progress show --columns name,status` or `stats distance --columns boat,dist
 
 Login handles all required permissions. If an older session needs updated permissions, run `marineverse login` again. No extra feature settings are needed.
 
+## Feedback and roadmap
+
+Browse public boards, search posts, and read discussions without logging in:
+
+```sh
+marineverse feedback roadmap
+marineverse feedback boards list
+marineverse feedback posts list BOARD_SLUG --search "docking" --sort top
+marineverse feedback posts suggested BOARD_SLUG --title "A docking idea" --description "Details"
+marineverse feedback posts show BOARD_SLUG POST_SLUG
+marineverse feedback boards feed BOARD_SLUG --types posts,comments --page 2
+marineverse feedback posts open BOARD_SLUG POST_SLUG
+```
+
+Use board and post slugs from the results. Post details include the post UUID, voters, related posts, comments, and replies. Lists support `--page`, `--sort trending|top|new`, and `--filter`; check `feedback posts list --help` for filters. The roadmap shows up to 20 posts per status, as on the website. Add `--json` for complete structured results or `--no-browser` to an `open` command to print its URL.
+
+`posts suggested` finds up to five similar posts before you publish. Signed-in suggestions use the website's semantic search; anonymous suggestions use text search. Suggestions are never automatically retried.
+
+Normal login enables your vote state, `--filter mine`, `--filter upvoted_by_me`, and contributions:
+
+```sh
+marineverse login
+marineverse feedback posts upvote BOARD_SLUG POST_SLUG
+marineverse feedback posts unvote BOARD_SLUG POST_SLUG
+marineverse feedback posts create BOARD_SLUG --title "A sailing idea" --description "Details of the idea"
+marineverse feedback posts update BOARD_SLUG POST_SLUG --title "Updated title" --description "Updated details"
+marineverse feedback comments create POST_UUID --content "My suggestion"
+marineverse feedback comments create POST_UUID --reply-to COMMENT_UUID --content "A reply"
+marineverse feedback comments update COMMENT_UUID --content "Updated comment"
+marineverse feedback comments upvote COMMENT_UUID
+marineverse feedback comments unvote COMMENT_UUID
+marineverse feedback comments delete COMMENT_UUID
+```
+
+Creating a post also upvotes it. You can edit your own posts and edit or delete your own comments; deleting a comment also removes its replies. Replies are one level deep. Merged posts are read-only. Private boards are not exposed. Feedback requires no paid membership. Writes are never automatically retried.
+
+Operators: deploy the v3 feedback API and frontend OAuth permission descriptions, then run the server's `marineverse_cli:register` task to add `feedback_read` and `feedback_write` to the existing CLI application. No database migration is needed for feedback. Existing CLI users run `marineverse login` again to grant the new permissions.
+
 ## Knowledge base and AI
 
 ```sh

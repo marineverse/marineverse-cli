@@ -7,6 +7,7 @@ import { VERSION } from './version.js';
 import { checkVersion, versionMessage, upgrade, type VersionInfo, type UpgradeResult } from './updates.js';
 import { openBrowser } from './auth.js';
 import { bundledSkill, manageSkill, type SkillAction } from './skills.js';
+import { feedbackFilters, feedbackSorts, roadmapFilters } from './feedback.js';
 
 export interface Services {
   client: (environment: Environment) => MarineVerseClient;
@@ -48,16 +49,16 @@ export function registerPublicCommands(program: Command, services: Services = de
   };
   // Positional arguments are captured by each handler; execution remains shared.
   const invoke = async (command: Command, action: (client: MarineVerseClient) => Promise<unknown>) => execute(action)(command.opts(), command);
-  const browserCommand = (group: Command, signature: string, description: string, path: (key?: string) => string) => {
+  const browserCommand = (group: Command, signature: string, description: string, path: (...keys: string[]) => string) => {
     group.command(signature).description(description).option('--no-browser', 'Print the URL without opening a browser')
       .action(async (...args: any[]) => {
         const command = args.at(-1) as Command;
         const opts = command.opts();
-        const key = command.registeredArguments.length ? args[0] as string | undefined : undefined;
-        if (key !== undefined && !/^[A-Za-z0-9_-]+$/.test(key)) usage('Resource keys may contain letters, numbers, underscores, and hyphens.');
+        const keys = args.slice(0, command.registeredArguments.length).filter((value): value is string => value !== undefined);
+        if (keys.some(key => !/^[\p{L}\p{N}_-]+$/u.test(key))) usage('Resource keys may contain letters, numbers, underscores, and hyphens.');
         const options = command.optsWithGlobals() as GlobalOptions;
         const environment = await resolveEnvironment(options);
-        const url = new URL(path(key), environment.webUrl).href;
+        const url = new URL(path(...keys.map(encodeURIComponent)), environment.webUrl).href;
         if (opts.browser) {
           try { await (services.openBrowser || openBrowser)(url); }
           catch { throw new CliError('BROWSER_ERROR', `Could not open your browser. Open this URL manually: ${url}`); }
@@ -94,6 +95,52 @@ export function registerPublicCommands(program: Command, services: Services = de
   auth.command('status').description('Verify the session and show identity, scopes, and expiry').action(execute(client => client.auth.status()));
   auth.command('logout').description('Revoke credentials and remove the local copy').action(execute(client => client.auth.logout()));
   const profile = program.command('profile').description('Your MarineVerse profile');
+  const feedback = program.command('feedback').description('Browse the roadmap and discuss feedback');
+  feedback.command('roadmap').description('Planned, in-progress, and completed work (latest 20 per status)')
+    .option('--search <text>', 'Search titles and descriptions')
+    .addOption(new Option('--filter <filter>', 'Filter roadmap posts').choices(roadmapFilters).default('all'))
+    .action((opts, command) => invoke(command, client => client.feedback.roadmap(opts)));
+  const feedbackBoards = feedback.command('boards').description('Feedback boards and recent activity');
+  feedbackBoards.command('list').description('List public feedback boards').action(execute(client => client.feedback.boards()));
+  feedbackBoards.command('feed <board>').description('Read recent posts, comments, and votes')
+    .option('--page <number>', 'Activity page', '1').option('--types <types>', 'Comma-separated posts,comments,votes')
+    .action((board, opts, command) => invoke(command, client => client.feedback.feed(board, opts)));
+  const feedbackPosts = feedback.command('posts').description('Read, create, edit, and vote on posts');
+  feedbackPosts.command('suggested <board>').description('Find similar posts before creating feedback')
+    .requiredOption('--title <text>', 'Proposed title').option('--description <text>', 'Proposed details')
+    .action((board, opts, command) => invoke(command, client => client.feedback.suggested(board, opts.title, opts.description)));
+  feedbackPosts.command('list <board>').description('Browse or search a board')
+    .option('--search <text>', 'Search titles and descriptions').option('--page <number>', 'Results page', '1')
+    .addOption(new Option('--sort <sort>', 'Sort posts').choices(feedbackSorts).default('trending'))
+    .addOption(new Option('--filter <filter>', 'Filter posts').choices(feedbackFilters).default('all'))
+    .action((board, opts, command) => invoke(command, client => client.feedback.posts(board, opts)));
+  feedbackPosts.command('show <board> <post>').description('Read a post, voters, related posts, and comments')
+    .action((board, post, _opts, command) => invoke(command, client => client.feedback.show(board, post)));
+  feedbackPosts.command('create <board>').description('Publish a post (login required)')
+    .requiredOption('--title <text>', 'Post title').requiredOption('--description <text>', 'Post details')
+    .action((board, opts, command) => invoke(command, client => client.feedback.create(board, opts.title, opts.description)));
+  feedbackPosts.command('update <board> <post>').description('Edit your own post (supply both title and description)')
+    .requiredOption('--title <text>', 'Post title').requiredOption('--description <text>', 'Post details')
+    .action((board, post, opts, command) => invoke(command, client => client.feedback.update(board, post, opts.title, opts.description)));
+  for (const [name, remove] of [['upvote', false], ['unvote', true]] as const) {
+    feedbackPosts.command(`${name} <board> <post>`).description(remove ? 'Remove your upvote' : 'Upvote a post')
+      .action((board, post, _opts, command) => invoke(command, client => client.feedback.vote(board, post, remove)));
+  }
+  const feedbackComments = feedback.command('comments').description('Comment, reply, edit, delete, and vote');
+  feedbackComments.command('create <post-uuid>').description('Publish a comment or reply (login required)')
+    .requiredOption('--content <text>', 'Comment text').option('--reply-to <comment-uuid>', 'Reply to a top-level comment')
+    .action((uuid, opts, command) => invoke(command, client => client.feedback.comment(uuid, opts.content, opts.replyTo)));
+  feedbackComments.command('update <comment-uuid>').description('Edit your own comment').requiredOption('--content <text>', 'Comment text')
+    .action((uuid, opts, command) => invoke(command, client => client.feedback.editComment(uuid, opts.content)));
+  feedbackComments.command('delete <comment-uuid>').description('Delete your own comment and its replies')
+    .action((uuid, _opts, command) => invoke(command, client => client.feedback.deleteComment(uuid)));
+  for (const [name, remove] of [['upvote', false], ['unvote', true]] as const) {
+    feedbackComments.command(`${name} <comment-uuid>`).description(remove ? 'Remove your comment upvote' : 'Upvote a comment')
+      .action((uuid, _opts, command) => invoke(command, client => client.feedback.voteComment(uuid, remove)));
+  }
+  browserCommand(feedback, 'open', 'Open the feedback roadmap', () => '/feedback');
+  browserCommand(feedbackBoards, 'open <board>', 'Open a feedback board', board => `/feedback/${board}`);
+  browserCommand(feedbackPosts, 'open <board> <post>', 'Open a post on the website', (board, post) => `/feedback/${board}/${post}`);
   const kb = program.command('kb').alias('knowledge-base').description('Search and read the knowledge base (membership required)');
   kb.command('search <query>').description('Find articles; uses AI tokens to embed your query')
     .option('--limit <count>', 'Maximum articles, 1–10', '5')
@@ -174,7 +221,7 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats, kb, ai]) {
+  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats, kb, ai, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }

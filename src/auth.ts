@@ -86,7 +86,7 @@ export class Auth {
     try {
       const verifier = randomBytes(32).toString('base64url');
       const url = new URL('/oauth/authorize', this.environment.webUrl);
-      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write sailing_cv kb_read ai_ask',
+      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write',
         redirect_uri: listener.redirectUri, state: listener.state, code_challenge_method: 'S256',
         code_challenge: createHash('sha256').update(verifier).digest('base64url') }).toString();
       options.announce(url.toString());
@@ -119,13 +119,13 @@ export class Auth {
     });
   }
 
-  async get(path: string, requiredScope?: string): Promise<any> {
+  async get(path: string, requiredScope?: string, retryReads = true): Promise<any> {
     const token = await this.accessToken();
     await this.requireScope(requiredScope);
-    try { return await request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } }); }
+    try { return await request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } }, 15_000, retryReads); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== 'AUTH_REQUIRED') throw error;
-      return request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${await this.accessToken(token)}` } });
+      return request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${await this.accessToken(token)}` } }, 15_000, retryReads);
     }
   }
 
@@ -139,6 +139,13 @@ export class Auth {
     if (scope && !(await this.credentials.read())?.scopes.includes(scope)) {
       throw new CliError('AUTH_REQUIRED', 'Your login needs updated permissions. Run marineverse login again.', 3);
     }
+  }
+
+  async write(method: 'POST' | 'PATCH' | 'DELETE', path: string, body: unknown, scope: string) {
+    const token = await this.accessToken();
+    await this.requireScope(scope);
+    return request(`${this.environment.apiUrl}${path}`, { method,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 
   // Chargeable requests are never replayed, including after a rejected token.

@@ -2,6 +2,7 @@ import type { Environment } from './config.js';
 import { Auth } from './auth.js';
 import { CliError, usage } from './errors.js';
 import { request } from './http.js';
+import { FeedbackClient } from './feedback.js';
 
 function object(value: any): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CliError('INVALID_RESPONSE', 'Unexpected API response structure.');
@@ -61,7 +62,11 @@ function metric(value: unknown): number | null {
 
 export class MarineVerseClient {
   readonly auth: Auth;
-  constructor(readonly environment: Environment) { this.auth = new Auth(environment); }
+  readonly feedback: FeedbackClient;
+  constructor(readonly environment: Environment) {
+    this.auth = new Auth(environment);
+    this.feedback = new FeedbackClient(this.auth);
+  }
   private publicGet(path: string) { return request(`${this.environment.apiUrl}/api/v2/globe${path}`); }
 
   async knowledgeSearch(query: string, limit = 5) {
