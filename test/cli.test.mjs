@@ -50,11 +50,14 @@ before(async () => {
     if (req.url === '/oauth/token') {
       const params = new URLSearchParams(body);
       if (params.get('grant_type') === 'refresh_token') refreshCount++;
-      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv' });
+      return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv kb_read ai_ask' });
     }
     if (req.url === '/oauth/revoke') return send(200, {});
     if (req.url === '/api/v3/users/me') return send(200, { uuid: 'user-key', display_name: 'Test Sailor', country_code: 'NZ', time_zone: 'Pacific/Auckland', id: 42, email: 'private@example.test' });
     if (req.url === '/api/v3/sailing_progress') return send(200, sailingData);
+    if (req.url === '/api/v3/knowledge_base/search') return send(200, { articles: [{ uuid: '00000000-0000-4000-8000-000000000001', title: 'Reefing', excerpt: 'Reduce sail.', relevance: 0.9, id: 99 }], tokens: { consumed: 7, remaining: 93 } });
+    if (req.url === '/api/v3/knowledge_base/00000000-0000-4000-8000-000000000001') return send(200, { article: { uuid: '00000000-0000-4000-8000-000000000001', title: 'Reefing', content: 'Reduce sail.\n\nKeep control.', id: 99 } });
+    if (req.url === '/api/v3/ai/ask') return send(200, { answer: 'Ease the sheet.\nThen reef.', interaction_uuid: '00000000-0000-4000-8000-000000000002', tokens: { consumed: 20, remaining: 73 }, user_id: 99 });
     if (req.url === '/api/v2/globe/races') return send(200, { registration_open_races: [], active_races: [race], finished_races: [] });
     if (req.url === '/api/v2/globe/races/race-key') return send(200, { race });
     if (req.url === '/api/v2/globe/boats/boat-key/profile') return send(200, { boat: currentBoat, races: { active: [race], past: [] } });
@@ -94,11 +97,59 @@ async function cli(...args) {
   const code = await run(['node', 'marineverse', ...args], { client: env => new MarineVerseClient(env), stdout: s => stdout += s, stderr: s => stderr += s });
   return { code, stdout, stderr, json: () => JSON.parse(stdout) };
 }
-async function signedIn(expired = false, scopes = ['public', 'globe_read', 'globe_write', 'sailing_cv']) {
+async function signedIn(expired = false, scopes = ['public', 'globe_read', 'globe_write', 'sailing_cv', 'kb_read', 'ai_ask']) {
   const auth = new Auth(environment);
   await auth.credentials.lock(() => auth.credentials.write({ userUuid: 'user-key', accessToken: 'access-0', refreshToken: 'refresh-0', scopes, expiresAt: Date.now() + (expired ? -100 : 7200_000) }, storage));
   return auth;
 }
+
+test('knowledge base and AI commands use authenticated requests and preserve readable paragraphs', async () => {
+  await signedIn();
+  const result = await cli('knowledge-base', 'search', 'reefing & wind', '--limit', '3', '--json');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.json().data.articles[0].title, 'Reefing');
+  assert.equal(result.json().data.articles[0].id, undefined);
+  assert.deepEqual(JSON.parse(requests.at(-1).body), { query: 'reefing & wind', limit: 3 });
+  assert.equal(requests.at(-1).method, 'POST');
+  assert.equal(requests.at(-1).authorization, 'Bearer access-0');
+  const article = await cli('kb', 'show', '00000000-0000-4000-8000-000000000001');
+  assert.equal(article.code, 0, article.stderr);
+  assert.match(article.stdout, /Reduce sail\.\n\nKeep control\./);
+  const answer = await cli('ai', 'ask', 'How do I reef?');
+  assert.equal(answer.code, 0, answer.stderr);
+  assert.equal(answer.stdout, 'Ease the sheet.\nThen reef.\n');
+  assert.deepEqual(JSON.parse(requests.at(-1).body), { question: 'How do I reef?' });
+});
+
+test('chargeable knowledge and AI requests are not automatically retried', async () => {
+  await signedIn();
+  for (const args of [['kb', 'search', 'reefing'], ['ai', 'ask', 'How do I reef?']]) {
+    for (const status of [401, 403, 429, 503]) {
+      failure = status;
+      requests = [];
+      const result = await cli(...args, '--json');
+      assert.notEqual(result.code, 0);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, 'POST');
+    }
+  }
+});
+
+test('knowledge and AI validate input and request normal login for old sessions', async () => {
+  await signedIn();
+  for (const args of [['kb', 'search', ' '], ['kb', 'search', 'x', '--limit', '11'], ['kb', 'show', '../private'], ['ai', 'ask', 'x'.repeat(8001)]]) {
+    assert.equal((await cli(...args)).code, 2);
+  }
+  assert.equal(requests.length, 0);
+  await signedIn(false, ['public']);
+  for (const args of [['kb', 'search', 'reef'], ['ai', 'ask', 'reef']]) {
+    const result = await cli(...args);
+    assert.equal(result.code, 3);
+    assert.match(result.stderr, /marineverse login/);
+  }
+  assert.equal(requests.length, 0);
+  for (const args of [['kb'], ['knowledge-base'], ['ai']]) assert.equal((await cli(...args)).code, 0);
+});
 
 test('help and version work offline', async () => {
   const bare = await cli();
@@ -483,7 +534,7 @@ test('browser login uses frontend consent with S256 then exchanges code and stor
   assert.equal(authorized.origin, environment.webUrl);
   assert.equal(authorized.pathname, '/oauth/authorize');
   assert.equal(authorized.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv');
+  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask');
   const exchange = new URLSearchParams(requests.find(r => r.path === '/oauth/token').body);
   assert.equal(exchange.get('code'), 'one-use-code');
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), authorized.searchParams.get('code_challenge'));

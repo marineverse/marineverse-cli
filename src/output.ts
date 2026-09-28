@@ -39,6 +39,12 @@ function selected(kind: TableKind, columns: [string, (row: any) => unknown][], n
 }
 
 export function human(data: any, columns?: string[]): string {
+  const paragraphs = (value: string) => value.split('\n').map(safe).join('\n');
+  if (data.article) return `${safe(data.article.title)} (${safe(data.article.uuid)})\n\n${paragraphs(data.article.content)}`;
+  if (data.answer) return paragraphs(data.answer);
+  if (data.articles) return data.articles.length
+    ? data.articles.map((article: any) => `${safe(article.title)} (${safe(article.uuid)})\n${safe(article.excerpt)}`).join('\n\n')
+    : 'No matching articles found.';
   if (data.profile) return human(data.profile);
   if (data.progress) {
     const { tutorials, ...summary } = data.progress;

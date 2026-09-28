@@ -100,11 +100,29 @@ marineverse stats distance --boat yacht --json
 
 Use `progress show --columns name,status` or `stats distance --columns boat,distance` to choose table columns. `profile open`, `progress open`, and `stats open` open the matching website pages; add `--no-browser` to print the URL. These website commands use the browser's own session.
 
-Login handles all required permissions. If an older session lacks access to progress or stats, run `marineverse login` again. No extra feature settings are needed.
+Login handles all required permissions. If an older session needs updated permissions, run `marineverse login` again. No extra feature settings are needed.
+
+## Knowledge base and AI
+
+```sh
+marineverse login
+marineverse kb search "How do I reef?"
+marineverse kb search "Globe sail controls" --limit 3 --json
+marineverse kb show ARTICLE_UUID
+marineverse ai ask "How can I improve my sailing?"
+```
+
+`knowledge-base` is an alias for `kb`. Search returns matching article titles, excerpts, and UUIDs; `show` returns the full article. Both KB and AI require an active MarineVerse membership. If needed, [manage your membership](https://www.marineverse.com/my-profile?tab=billing).
+
+Search deducts the embedding provider's reported token usage from your AI quota, including searches with no matches. Reading an article consumes no AI tokens. `ai ask` uses the same assistant and AI quota as the website. JSON search and AI results include `tokens.consumed` and `tokens.remaining`.
+
+Articles default to `public` (available to members). `admin` articles are only available to admins, and `internal` articles are used by AI but never returned by `kb search/show`. Internal content may inform an AI answer; this visibility is not a place to store secrets.
 
 ### Operator rollout
 
-Before releasing this version, deploy the updated server registration task and run `bin/rails marineverse_cli:register` in each target environment. It updates the existing MarineVerse CLI application without changing its public client ID, adding `sailing_cv` to `public globe_read globe_write`. Existing progress and profile API endpoints need no new migration. Users then sign in normally to consent to the full permission set. Update the frontend consent description to include progress, distance, and time statistics.
+Deploy the server changes and run `bin/rails db:migrate` to add article UUIDs and visibility. Existing articles become public; review their visibility in the admin before making the KB endpoints available to members. Then run `bin/rails marineverse_cli:register` in each target environment. This updates the existing CLI application without changing its public client ID, adding `kb_read` and `ai_ask` to its permissions. Deploy the frontend consent descriptions. Users then run normal `marineverse login` again.
+
+The authenticated v3 endpoints are `POST /api/v3/knowledge_base/search` (`query`, optional integer `limit`, default 5, maximum 10), `GET /api/v3/knowledge_base/:uuid`, and `POST /api/v3/ai/ask` (`question`). Search accepts up to 2,000 characters; AI accepts up to 8,000. Search and AI use POST because they consume quota, and the CLI never automatically retries them. They allow up to 120 seconds client-side, subject to the server's AI request timeout. Requests are limited to 10 per minute per account per controller using the server's Rack::Attack cache store; use a shared cache to enforce this across workers.
 
 ## Try it
 

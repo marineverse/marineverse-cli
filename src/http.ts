@@ -9,7 +9,7 @@ export function retryAfterSeconds(value: string | null, now = Date.now()): numbe
   return Number.isFinite(seconds) ? Math.max(0, Math.ceil(seconds)) : undefined;
 }
 
-export async function request(url: string, options: RequestInit = {}): Promise<any> {
+export async function request(url: string, options: RequestInit = {}, timeoutMs = 15_000): Promise<any> {
   const method = options.method || 'GET';
   const headers = new Headers(options.headers);
   headers.set('Accept', 'application/json');
@@ -19,7 +19,7 @@ export async function request(url: string, options: RequestInit = {}): Promise<a
   for (let attempt = 0; ; attempt++) {
     let response: Response;
     try {
-      response = await fetch(url, { ...options, headers, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+      response = await fetch(url, { ...options, headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
     } catch {
       throw new CliError('NETWORK_ERROR', method === 'GET' ? 'Request failed or timed out.' : 'Request failed; the operation may have completed. Read back state before retrying.');
     }

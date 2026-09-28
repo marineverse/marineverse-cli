@@ -94,6 +94,15 @@ export function registerPublicCommands(program: Command, services: Services = de
   auth.command('status').description('Verify the session and show identity, scopes, and expiry').action(execute(client => client.auth.status()));
   auth.command('logout').description('Revoke credentials and remove the local copy').action(execute(client => client.auth.logout()));
   const profile = program.command('profile').description('Your MarineVerse profile');
+  const kb = program.command('kb').alias('knowledge-base').description('Search and read the knowledge base (membership required)');
+  kb.command('search <query>').description('Find articles; uses AI tokens to embed your query')
+    .option('--limit <count>', 'Maximum articles, 1–10', '5')
+    .action((query, opts, command) => invoke(command, client => client.knowledgeSearch(query, Number(opts.limit))));
+  kb.command('show <article-uuid>').description('Read a full article; no AI token charge')
+    .action((uuid, _opts, command) => invoke(command, client => client.knowledgeArticle(uuid)));
+  const ai = program.command('ai').description('Ask the MarineVerse assistant (membership and AI tokens required)');
+  ai.command('ask <question>').description('Ask a question using your MarineVerse account and AI quota')
+    .action((question, _opts, command) => invoke(command, client => client.ask(question)));
   profile.command('show').description('Show your profile (login required)').action(execute(client => client.myProfile()));
   browserCommand(profile, 'open', 'Open your profile on the website', () => '/my-profile');
   const progress = program.command('progress').description('Your sailing lessons and next step');
@@ -165,7 +174,7 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats]) {
+  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats, kb, ai]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }

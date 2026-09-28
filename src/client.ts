@@ -64,6 +64,26 @@ export class MarineVerseClient {
   constructor(readonly environment: Environment) { this.auth = new Auth(environment); }
   private publicGet(path: string) { return request(`${this.environment.apiUrl}/api/v2/globe${path}`); }
 
+  async knowledgeSearch(query: string, limit = 5) {
+    if (!query.trim() || query.length > 2000) usage('Search must contain 1–2000 characters.');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) usage('--limit must be an integer from 1 to 10.');
+    const result = object(await this.auth.post('/api/v3/knowledge_base/search', { query: query.trim(), limit }, 'kb_read'));
+    return { articles: array(result.articles).map(article => pick(article, ['uuid', 'title', 'excerpt', 'relevance'])), tokens: pick(result.tokens, ['consumed', 'remaining']) };
+  }
+
+  async knowledgeArticle(uuid: string) {
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(uuid)) usage('Use the article UUID from kb search.');
+    const result = object(await this.auth.get(`/api/v3/knowledge_base/${uuid}`, 'kb_read'));
+    return { article: pick(result.article, ['uuid', 'title', 'content']) };
+  }
+
+  async ask(question: string) {
+    if (!question.trim() || question.length > 8000) usage('Question must contain 1–8000 characters.');
+    const result = object(await this.auth.post('/api/v3/ai/ask', { question: question.trim() }, 'ai_ask'));
+    if (typeof result.answer !== 'string') throw new CliError('INVALID_RESPONSE', 'AI response is missing its answer.');
+    return { ...pick(result, ['answer', 'interaction_uuid']), tokens: pick(result.tokens, ['consumed', 'remaining']) };
+  }
+
   async myProfile() {
     const result = object(await this.auth.get('/api/v3/users/me'));
     return { profile: { ...identity(result), ...pick(result, ['sailing_experience', 'marineverse_interests', 'time_zone',
