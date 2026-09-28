@@ -217,6 +217,18 @@ Tests use synthetic accounts/tokens and loopback fixture servers. They do not ne
 
 The public command-registration function is exported for future composition into a separate private admin CLI; admin commands and credentials do not belong in this package.
 
+### Publish a release
+
+Set the intended version with `npm version patch --no-git-tag-version` if it has not already been bumped. Commit and push the changes, deploy any required backend changes, and wait for GitHub CI to pass. Then:
+
+```sh
+npm run release
+```
+
+The script reads the version from `package.json`, requires a clean checkout pushed to origin, runs tests and release/package checks, and publishes the packed artifact to npm with public access and the `latest` tag. Sign in with `npm login` first if needed; npm handles publishing verification prompts. It then creates and pushes the matching Git tag. It never bumps the version or commits changes for you. If a release is interrupted, rerun it: an already-published package is reused only when its checksum matches exactly. A different package under the same version or a conflicting Git tag stops the release.
+
+Preview with `npm run release -- --dry-run`. This allows uncommitted work and runs the same checks and packaging without publishing or changing Git. Finally, the script prints the tarball URL and SHA-256 for the Homebrew formula; update and push the tap separately.
+
 ## License and trademarks
 
 Copyright 2026 MarineVerse. Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) and [third-party notices](THIRD_PARTY_NOTICES). Dependencies retain their own licenses.
