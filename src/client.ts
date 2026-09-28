@@ -20,10 +20,12 @@ function identifier(value: string): string {
   return encodeURIComponent(value);
 }
 export function boat(value: any) {
-  const data = pick(value, ['uuid', 'name', 'heading', 'location_name', 'latitude', 'longitude', 'p_lat', 'p_lng', 'last_speed_kts', 'last_speed_in_kts', 'mainsail_hoist', 'jib_hoist', 'is_owner', 'is_crew']);
+  const data = pick(value, ['uuid', 'name', 'heading', 'location_name', 'latitude', 'longitude', 'p_lat', 'p_lng', 'last_speed_kts', 'last_speed_in_kts', 'mainsail_hoist', 'jib_hoist', 'is_anchored', 'is_owner', 'is_crew']);
   if (typeof data.uuid !== 'string') throw new CliError('INVALID_RESPONSE', 'Boat response is missing its UUID.');
   data.latitude = data.latitude ?? data.p_lat ?? null;
   data.longitude = data.longitude ?? data.p_lng ?? null;
+  data.mainsail_hoist = data.mainsail_hoist ?? value.mainsail_hoist_level ?? null;
+  data.jib_hoist = data.jib_hoist ?? value.jib_hoist_level ?? null;
   return data;
 }
 function raceSummary(value: any) {
@@ -113,7 +115,7 @@ export class MarineVerseClient {
   }
   async boats() { return { boats: array((await this.auth.get('/api/v3/globe_boats')).boats).map(boat) }; }
   async showBoat(uuid: string) { return { boat: boat((await this.auth.get(`/api/v3/globe_boats/${identifier(uuid)}`)).boat) }; }
-  async updateBoat(uuid: string, change: { heading?: number; name?: string }) {
+  async updateBoat(uuid: string, change: { heading?: number; name?: string; mainsail_hoist?: number; jib_hoist?: number }) {
     const path = `/api/v3/globe_boats/${identifier(uuid)}`;
     const accepted = boat((await request(`${this.environment.apiUrl}${path}`, { method: 'PATCH',
       headers: { Authorization: `Bearer ${await this.auth.accessToken()}`, 'Content-Type': 'application/json' },

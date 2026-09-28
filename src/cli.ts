@@ -137,6 +137,28 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!opts.degrees.trim() || !Number.isFinite(heading) || heading < 0 || heading > 360) usage('Heading must be a finite number between 0 and 360.');
       return invoke(command, client => client.updateBoat(uuid, { heading: heading % 360 }));
     });
+  for (const [name, level, description] of [
+    ['raise-sails', 1, 'Fully raise both sails to start sailing'],
+    ['lower-sails', 0, 'Fully lower both sails (anchors the boat in Globe)'],
+    ['drop-anchor', 0, 'Anchor the boat by fully lowering both sails'],
+  ] as const) {
+    tableCommand(boats.command(`${name} <boat-uuid>`), 'boats').description(description)
+      .action((uuid, _opts, command) => invoke(command, client => client.updateBoat(uuid, { mainsail_hoist: level, jib_hoist: level })));
+  }
+  tableCommand(boats.command('set-sails <boat-uuid>'), 'boats').description('Set either sail; omitted sails keep their current level')
+    .option('--main <level>', 'Mainsail hoist from 0 (lowered) to 1 (fully raised)')
+    .option('--jib <level>', 'Jib hoist from 0 (lowered) to 1 (fully raised)')
+    .action((uuid, opts, command) => {
+      const change: { mainsail_hoist?: number; jib_hoist?: number } = {};
+      for (const [option, field] of [['main', 'mainsail_hoist'], ['jib', 'jib_hoist']] as const) {
+        if (opts[option] === undefined) continue;
+        const level = Number(opts[option]);
+        if (!opts[option].trim() || !Number.isFinite(level) || level < 0 || level > 1) usage(`--${option} must be a finite number between 0 and 1.`);
+        change[field] = level;
+      }
+      if (!Object.keys(change).length) usage('Specify --main and/or --jib with a level from 0 to 1.');
+      return invoke(command, client => client.updateBoat(uuid, change));
+    });
   tableCommand(boats.command('rename <boat-uuid>'), 'boats').requiredOption('--name <name>').description('Rename your boat (Sailing Pass required; sends the existing rename notification)')
     .action((uuid, opts, command) => {
       const name = opts.name.replace(/\s+/g, ' ').trim();

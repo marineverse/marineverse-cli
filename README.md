@@ -153,7 +153,21 @@ node ./bin/marineverse.js --env local auth logout
 
 Login opens the existing website login/consent page, using authorization code + S256 PKCE and a short-lived loopback listener. `auth login --no-browser` prints a link to open in a browser on the same computer; this is not a remote device-code flow. The CLI never asks for your MarineVerse password. It refreshes tokens as needed.
 
-Heading changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
+Heading and sail changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
+
+### Sails and anchoring
+
+```sh
+marineverse globe boats raise-sails BOAT_UUID
+marineverse globe boats set-sails BOAT_UUID --main 0.75 --jib 0.5
+marineverse globe boats lower-sails BOAT_UUID
+marineverse globe boats drop-anchor BOAT_UUID
+marineverse globe boats show BOAT_UUID --columns name,latitude,longitude,main,jib,anchored
+```
+
+Sail levels range from `0` (fully lowered) to `1` (fully raised). `set-sails` changes only the sails you specify. In Globe, both sails below `0.05` means anchored: `drop-anchor` and `lower-sails` set both to zero. `raise-sails` sets both to one and resumes sailing. There is no separate anchor toggle. Commands send one update, then read back the result; `--json` includes the requested change and verification status.
+
+Before using these commands against production, deploy the backend change that allows `mainsail_hoist` and `jib_hoist` on the existing OAuth boat-update endpoint. No database migration, new OAuth scope, or additional login configuration is needed.
 
 `marineverse login` is also available as a shortcut for `marineverse auth login`, with the same options.
 
