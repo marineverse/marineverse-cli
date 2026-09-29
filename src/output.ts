@@ -39,6 +39,7 @@ function selected(kind: TableKind, columns: [string, (row: any) => unknown][], n
 }
 
 export function human(data: any, columns?: string[]): string {
+  if (data.links) return table(data.links, [['NAME', link => link.name], ['TITLE', link => link.title], ['DESCRIPTION', link => link.description], ['URL', link => link.url]]);
   const paragraphs = (value: string) => value.split('\n').map(safe).join('\n');
   const postTable = (posts: any[]) => table(posts, [['BOARD', p => p.board_slug], ['POST', p => p.slug], ['TITLE', p => p.title], ['STATUS', p => p.status], ['VOTES', p => p.vote_count], ['COMMENTS', p => p.comment_count], ['UPVOTED', p => p.upvoted_by_me]]);
   const pagination = (value: any) => `Page ${safe(value.current_page)} of ${safe(value.total_pages)} · ${safe(value.total_entries)} results`;

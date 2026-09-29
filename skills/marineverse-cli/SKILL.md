@@ -1,21 +1,21 @@
 ---
-name: marineverse
-description: Install and use the MarineVerse CLI for sailing data, Globe boat controls, profiles, progress, statistics, feedback boards, roadmap, votes, comments, and sailing guidance. Prefer fast direct CLI commands; check help before falling back to knowledge-base search or MarineVerse AI.
+name: marineverse-cli
+description: Install and use the MarineVerse CLI for sailing data, Globe boat controls, profiles, progress, statistics, feedback boards, roadmap, votes, comments, Discord community access, and sailing guidance. Prefer fast direct CLI commands; check help before falling back to knowledge-base search or MarineVerse AI.
 license: Apache-2.0
 ---
 
-# MarineVerse
+# MarineVerse CLI
 
 Use the MarineVerse CLI for public Globe data, personal sailing progress and statistics, account-authorized boat controls, knowledge-base articles, and MarineVerse AI questions. This file is self-contained: it can bootstrap the CLI even when only a link to this skill was supplied.
 
 ## Install this skill when requested
 
-Save this file as `marineverse/SKILL.md` under the current agent's skill directory:
+Save this file as `marineverse-cli/SKILL.md` under the current agent's skill directory:
 
 - Codex personal: `~/.agents/skills/`; project-only: `.agents/skills/`.
 - Claude Code personal: `~/.claude/skills/`; project-only: `.claude/skills/`.
 
-Use personal scope unless the user requests project scope. Create only the selected agent's directory. Preserve an existing customized skill; compare it rather than overwriting it. If using an agent's built-in installer, point it to `skills/marineverse` in the same repository/ref as this file. Retain the repository's LICENSE, NOTICE, and THIRD_PARTY_NOTICES with the installed skill. Continue using these instructions in the current session; refresh/restart the agent if needed for later discovery.
+Use personal scope unless the user requests project scope. Create only the selected agent's directory. Preserve an existing customized skill; compare it rather than overwriting it. If using an agent's built-in installer, point it to `skills/marineverse-cli` in the same repository/ref as this file. Retain the repository's LICENSE, NOTICE, and THIRD_PARTY_NOTICES with the installed skill. Continue using these instructions in the current session; refresh/restart the agent if needed for later discovery.
 
 The CLI provides `skills install`, `skills update`, and `skills uninstall` after bootstrap. Those helpers manage a copy with checksums and refuse to replace customized files. A manually installed copy can be kept as-is; it does not need to be replaced by the helper.
 
@@ -75,6 +75,14 @@ marineverse globe races open RACE_KEY --no-browser --json
 ```
 
 Omit `--no-browser` when the user wants the page opened on the CLI's machine.
+
+## Useful links
+
+Use `marineverse links` or `marineverse links list --json` to discover useful destinations without login or API access. Print a link with `marineverse links url NAME`; open it on the CLI's machine with `marineverse links open NAME` (or add `--no-browser` to print it). Names are `website`, `llms`, `dashboard`, `try-sailing`, `history`, `links`, `steam`, `quest`, `cli`, `mcp`, and `discord`. These links always point to public production destinations; website pages use the browser's own session.
+
+## Discord community
+
+Use `marineverse discord url` to print the invite URL, `https://discord.gg/marineverse`, or `marineverse discord open` when the user wants it opened in the browser on the CLI's machine. Both commands work without login or environment configuration. Use `discord url --json` for a structured link; `discord open --no-browser` also prints the URL without launching a browser.
 
 ## Feedback and roadmap
 

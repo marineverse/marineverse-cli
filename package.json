@@ -28,7 +28,7 @@
   "files": [
     "bin/",
     "dist/",
-    "skills/marineverse/SKILL.md",
+    "skills/marineverse-cli/SKILL.md",
     "README.md",
     "LICENSE",
     "NOTICE",

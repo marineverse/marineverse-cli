@@ -15,11 +15,11 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 
 export function skillDirectory(agent: SkillAgent, scope: SkillScope, home = homedir(), cwd = process.cwd()): string {
-  return join(scope === 'user' ? home : resolve(cwd), agent === 'codex' ? '.agents' : '.claude', 'skills', 'marineverse');
+  return join(scope === 'user' ? home : resolve(cwd), agent === 'codex' ? '.agents' : '.claude', 'skills', 'marineverse-cli');
 }
 
 export async function bundledSkill(): Promise<string> {
-  return readFile(join(packageRoot, 'skills', 'marineverse', 'SKILL.md'), 'utf8');
+  return readFile(join(packageRoot, 'skills', 'marineverse-cli', 'SKILL.md'), 'utf8');
 }
 
 async function assertManaged(directory: string): Promise<void> {

@@ -14,7 +14,7 @@ test('gitignore protects common local files while retaining public deliverables'
     'tmp/session.json', 'test-results/report.json', '.agents/skills/private/SKILL.md', '.claude/settings.json',
     '.mcp.json', '.idea/workspace.xml', '.vscode/settings.json', 'backup.bak', 'private.p12', 'release.tgz'];
   const kept = ['src/cli.ts', 'test/cli.test.mjs', 'package-lock.json', '.env.example', '.env.production.example',
-    '.npmrc.example', 'skills/marineverse/SKILL.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES', '.github/workflows/ci.yml'];
+    '.npmrc.example', 'skills/marineverse-cli/SKILL.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES', '.github/workflows/ci.yml'];
   const result = execFileSync('git', ['check-ignore', '--no-index', '--stdin', '-z'], { cwd: root,
     input: [...ignored, ...kept].join('\0') + '\0', encoding: 'utf8' }).split('\0').filter(Boolean);
   assert.deepEqual(result, ignored);

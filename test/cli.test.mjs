@@ -355,6 +355,51 @@ test('old sessions can read their profile and are told to log in again for progr
   await auth.credentials.lock(() => auth.credentials.remove());
   for (const args of [['profile', 'show'], ['progress', 'show'], ['stats', 'distance']]) assert.equal((await cli(...args)).code, 3);
 });
+test('useful links list and open named public URLs without clients or network access', async () => {
+  const expected = [
+    ['website', 'https://www.marineverse.com/'], ['llms', 'https://www.marineverse.com/llms.txt'],
+    ['dashboard', 'https://www.marineverse.com/dashboard-app'], ['my-profile', 'https://www.marineverse.com/my-profile'],
+    ['try-sailing', 'https://www.marineverse.com/try-sailing'],
+    ['history', 'https://www.marineverse.com/marineverse-sailing-club/history'], ['links', 'https://www.marineverse.com/links'],
+    ['steam', 'https://www.marineverse.com/steam'], ['quest', 'https://www.marineverse.com/quest'],
+    ['cli', 'https://www.marineverse.com/cli'], ['mcp', 'https://www.marineverse.com/mcp'], ['discord', 'https://discord.gg/marineverse'],
+    ['support', 'https://www.marineverse.com/contact'],
+    ['blog', 'https://blog.marineverse.com/'], ['learn-to-sail', 'https://www.marineverse.com/learn-how-to-sail'],
+    ['racing-dashboard', 'https://www.marineverse.com/marineverse-cup/racing-dashboard'],
+    ['multiplayer', 'https://www.marineverse.com/marineverse-cup/multiplayer'],
+  ];
+  const call = async (...args) => {
+    let output = '', error = '', opened;
+    const code = await run(['node', 'marineverse', '--env', 'not-configured', ...args], {
+      client: assert.fail, stdout: text => output += text, stderr: text => error += text,
+      openBrowser: async url => { opened = url; },
+    });
+    return { code, output, error, opened };
+  };
+  for (const args of [['links', '--json'], ['links', 'list', '--json']]) {
+    const result = await call(...args);
+    assert.equal(result.code, 0);
+    assert.deepEqual(JSON.parse(result.output).data.links.map(link => [link.name, link.url]), expected);
+  }
+  assert.match((await call('links')).output, /NAME\s+TITLE\s+DESCRIPTION\s+URL/);
+  for (const [name, url] of expected) {
+    assert.equal((await call('links', 'url', name)).output, `${url}\n`);
+    const opened = await call('links', 'open', name, '--json');
+    assert.equal(opened.opened, url);
+    assert.deepEqual(JSON.parse(opened.output).data, { url, browser_opened: true });
+    const printed = await call('links', 'open', name, '--no-browser', '--json');
+    assert.equal(printed.opened, undefined);
+    assert.deepEqual(JSON.parse(printed.output).data, { url, browser_opened: false });
+  }
+  for (const action of ['url', 'open']) {
+    const invalid = await call('links', action, 'https://example.com', '--json');
+    assert.equal(invalid.code, 2);
+    assert.equal(JSON.parse(invalid.output).error.code, 'INVALID_USAGE');
+    assert.match(JSON.parse(invalid.output).error.message, /Unknown link.*Choose from:/);
+    assert.equal(invalid.opened, undefined);
+  }
+  assert.equal(requests.length, 0);
+});
 test('account browser commands open the selected website without accessing credentials', async () => {
   for (const [group, path] of [['profile', '/my-profile'], ['progress', '/marineverse-cup/my-progress'], ['stats', '/marineverse-cup/my-distance-stats']]) {
     let output = '', opened;

@@ -21,7 +21,7 @@ try {
   env.MARINEVERSE_CONFIG_DIR = join(temporary, 'settings');
   const cli = args => execFileSync(process.execPath, [bin, ...args], { encoding: 'utf8', cwd: resolve(temporary), env });
   for (const args of [[], ['help'], ['globe'], ['globe', 'boats'], ['login', '--help']]) assert.match(cli(args), /Usage: marineverse/);
-  const skill = await readFile('skills/marineverse/SKILL.md', 'utf8');
+  const skill = await readFile('skills/marineverse-cli/SKILL.md', 'utf8');
   assert.equal(cli(['skills', 'show']), skill);
   for (const agent of ['codex', 'claude']) {
     const args = ['--agent', agent, '--scope', 'project', '--json'];

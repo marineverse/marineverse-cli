@@ -8,6 +8,7 @@ import { checkVersion, versionMessage, upgrade, type VersionInfo, type UpgradeRe
 import { openBrowser } from './auth.js';
 import { bundledSkill, manageSkill, type SkillAction } from './skills.js';
 import { feedbackFilters, feedbackSorts, roadmapFilters } from './feedback.js';
+import { marineverseLinks } from './links.js';
 
 export interface Services {
   client: (environment: Environment) => MarineVerseClient;
@@ -49,6 +50,15 @@ export function registerPublicCommands(program: Command, services: Services = de
   };
   // Positional arguments are captured by each handler; execution remains shared.
   const invoke = async (command: Command, action: (client: MarineVerseClient) => Promise<unknown>) => execute(action)(command.opts(), command);
+  const showUrl = async (command: Command, url: string, browser: boolean, meta: { environment?: string } = {}) => {
+    if (browser) {
+      try { await (services.openBrowser || openBrowser)(url); }
+      catch { throw new CliError('BROWSER_ERROR', `Could not open your browser. Open this URL manually: ${url}`); }
+    }
+    services.stdout(command.optsWithGlobals().json
+      ? `${JSON.stringify({ schema_version: 1, data: { url, browser_opened: browser }, meta })}\n`
+      : `${url}\n`);
+  };
   const browserCommand = (group: Command, signature: string, description: string, path: (...keys: string[]) => string) => {
     group.command(signature).description(description).option('--no-browser', 'Print the URL without opening a browser')
       .action(async (...args: any[]) => {
@@ -59,15 +69,36 @@ export function registerPublicCommands(program: Command, services: Services = de
         const options = command.optsWithGlobals() as GlobalOptions;
         const environment = await resolveEnvironment(options);
         const url = new URL(path(...keys.map(encodeURIComponent)), environment.webUrl).href;
-        if (opts.browser) {
-          try { await (services.openBrowser || openBrowser)(url); }
-          catch { throw new CliError('BROWSER_ERROR', `Could not open your browser. Open this URL manually: ${url}`); }
-        }
-        services.stdout(options.json
-          ? `${JSON.stringify({ schema_version: 1, data: { url, browser_opened: opts.browser }, meta: { environment: environment.name } })}\n`
-          : `${url}\n`);
+        await showUrl(command, url, opts.browser, { environment: environment.name });
       });
   };
+  const links = program.command('links').description('List, print, or open useful MarineVerse links');
+  const listLinks = (_opts: unknown, command: Command) => {
+    const data = { links: marineverseLinks };
+    services.stdout(command.optsWithGlobals().json
+      ? `${JSON.stringify({ schema_version: 1, data, meta: {} })}\n`
+      : `${human(data)}\n`);
+  };
+  links.action(listLinks);
+  links.command('list').description('List useful MarineVerse links').action(listLinks);
+  const linkUrl = (name: string) => {
+    const link = marineverseLinks.find(link => link.name === name);
+    if (!link) usage(`Unknown link "${name}". Choose from: ${marineverseLinks.map(link => link.name).join(', ')}.`);
+    return link.url;
+  };
+  links.command('url <name>').description('Print a named MarineVerse URL')
+    .action((name, _opts, command) => showUrl(command, linkUrl(name), false));
+  links.command('open <name>').description('Open a named MarineVerse link in your browser')
+    .option('--no-browser', 'Print the URL without opening a browser')
+    .action((name, opts, command) => showUrl(command, linkUrl(name), opts.browser));
+  links.helpCommand(true);
+  const discord = program.command('discord').description('Join the MarineVerse Discord community');
+  const discordUrl = linkUrl('discord');
+  discord.command('open').description('Open the MarineVerse Discord invite in your browser')
+    .option('--no-browser', 'Print the URL without opening a browser')
+    .action((opts, command) => showUrl(command, discordUrl, opts.browser));
+  discord.command('url').description('Print the MarineVerse Discord invite URL')
+    .action((_opts, command) => showUrl(command, discordUrl, false));
   const config = program.command('config').description('Configure API, website, and OAuth client for each environment');
   config.command('set <name>').requiredOption('--web-url <origin>').option('--client-id <id>')
     .description('Save and select an environment (client ID is public, not a secret)')
@@ -221,7 +252,7 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, profile, progress, stats, skills, globe, races, boats, kb, ai, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
+  for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }

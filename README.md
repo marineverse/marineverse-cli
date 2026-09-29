@@ -19,19 +19,19 @@ Public races and boat profiles do not require login. In the checkout examples be
 
 ## Set up with your agent
 
-Give Codex or Claude Code [the MarineVerse skill](skills/marineverse/SKILL.md) and ask:
+Give Codex or Claude Code [the MarineVerse CLI skill](skills/marineverse-cli/SKILL.md) and ask:
 
-> Install this MarineVerse skill for yourself, then use it to install and configure the MarineVerse CLI. Verify it by listing public Globe races. Let me complete browser login if my next task needs an account.
+> Install this MarineVerse CLI skill for yourself, then use it to install and configure the MarineVerse CLI. Verify it by listing public Globe races. Let me complete browser login if my next task needs an account.
 
 The skill includes setup instructions and works before the CLI is installed. It installs the published npm package, or uses an existing checkout when requested. It preserves existing configuration and does not change boats during setup. Node 24+ is required; the agent will report missing prerequisites.
 
 The shareable skill URL is:
 
 ```text
-https://raw.githubusercontent.com/marineverse/marineverse-cli/master/skills/marineverse/SKILL.md
+https://raw.githubusercontent.com/marineverse/marineverse-cli/master/skills/marineverse-cli/SKILL.md
 ```
 
-For a stable release, replace `master` with its tag or commit. You can also give your agent the local `skills/marineverse/SKILL.md` file and checkout path.
+For a stable release, replace `master` with its tag or commit. You can also give your agent the local `skills/marineverse-cli/SKILL.md` file and checkout path.
 
 Once the CLI is available, these helpers install the bundled skill into the current user's agent directory:
 
@@ -42,7 +42,7 @@ node ./bin/marineverse.js skills update --agent codex
 node ./bin/marineverse.js skills uninstall --agent codex
 ```
 
-Add `--scope project` to use the current project's `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code). Personal installs use those directories under your home folder. The helpers work offline, include legal notices, and never install the CLI or log in automatically. Updates use the skill bundled with the installed CLI; upgrade the CLI first to obtain a newer skill. Modified, manually installed, symlinked, or extra-file copies are preserved and reported as conflicts. Only installations created by the helper can be updated or removed by it. `skills show` prints the complete instructions without installing anything.
+Add `--scope project` to use the current project's `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code). Personal installs use those directories under your home folder. The skill directory is named `marineverse-cli`; existing `marineverse` skills are preserved. The helpers work offline, include legal notices, and never install the CLI or log in automatically. Updates use the skill bundled with the installed CLI; upgrade the CLI first to obtain a newer skill. Modified, manually installed, symlinked, or extra-file copies are preserved and reported as conflicts. Only installations created by the helper can be updated or removed by it. `skills show` prints the complete instructions without installing anything.
 
 ## Run from this checkout
 
@@ -101,6 +101,26 @@ marineverse stats distance --boat yacht --json
 Use `progress show --columns name,status` or `stats distance --columns boat,distance` to choose table columns. `profile open`, `progress open`, and `stats open` open the matching website pages; add `--no-browser` to print the URL. These website commands use the browser's own session.
 
 Login handles all required permissions. If an older session needs updated permissions, run `marineverse login` again. No extra feature settings are needed.
+
+## Useful links
+
+```sh
+marineverse links                 # List useful destinations
+marineverse links url dashboard   # Print a named URL
+marineverse links open try-sailing
+marineverse links list --json
+```
+
+Names are `website`, `llms`, `dashboard`, `try-sailing`, `history`, `links`, `steam`, `quest`, `cli`, `mcp`, and `discord`. These commands use public production URLs and work without login, API access, or environment configuration. Add `--no-browser` to `links open` to print the URL.
+
+## Discord community
+
+```sh
+marineverse discord open  # Open the invite in your browser
+marineverse discord url   # Print https://discord.gg/marineverse
+```
+
+Both commands work without login. Add `--json` for structured output, or use `discord open --no-browser` to print the URL without opening a browser.
 
 ## Feedback and roadmap
 
