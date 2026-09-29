@@ -82,6 +82,8 @@ marineverse upgrade    # Upgrade using npm or Homebrew
 
 To try them from a source checkout, use `node ./bin/marineverse.js version` or `node ./bin/marineverse.js upgrade` after `npm run build`.
 
+A newly published npm release can take a few minutes to become available. If an upgrade reports that the MarineVerse CLI version or tarball is missing, wait a few minutes and run `marineverse upgrade` again.
+
 The CLI detects how the running copy was installed and upgrades that installation. npm project installs are updated in their project; global installs retain their prefix. Source checkouts and temporary npx installs receive instructions instead. Homebrew releases may follow npm releases. Version checks make one anonymous request to npm with a three-second timeout; they do not run during other commands. `--json` remains available for agents, with package-manager output on stderr. No automatic upgrades, login, or extra settings are needed.
 
 ## Profile, progress, and stats

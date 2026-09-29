@@ -36,8 +36,8 @@ function installation(): Installation {
 export function upgradeCommand(method: Installation): string | null {
   switch (method) {
     case 'homebrew': return 'brew update && brew upgrade marineverse/tap/marineverse';
-    case 'npm-global': return 'npm install -g @marineverse/cli@latest';
-    case 'npm-local': return 'npm install @marineverse/cli@latest';
+    case 'npm-global': return 'npm install -g --prefer-online @marineverse/cli@latest';
+    case 'npm-local': return 'npm install --prefer-online @marineverse/cli@latest';
     case 'npx': return 'npx @marineverse/cli@latest --help';
     case 'source': return 'git pull --ff-only && npm ci && npm run build';
     default: return null;
@@ -53,10 +53,10 @@ export function upgradeSteps(method: Installation, root: string): UpgradeStep[] 
   const nodeModules = path.lastIndexOf('/node_modules/@marineverse/cli');
   if (method === 'npm-global' && nodeModules >= 0) {
     const prefix = path.slice(0, nodeModules).replace(/\/lib$/, '');
-    return [{ command: 'npm', args: ['install', '--global', '@marineverse/cli@latest'], prefix }];
+    return [{ command: 'npm', args: ['install', '--global', '--prefer-online', '@marineverse/cli@latest'], prefix }];
   }
   if (method === 'npm-local' && nodeModules >= 0) {
-    return [{ command: 'npm', args: ['install', '@marineverse/cli@latest'], cwd: path.slice(0, nodeModules) }];
+    return [{ command: 'npm', args: ['install', '--prefer-online', '@marineverse/cli@latest'], cwd: path.slice(0, nodeModules) }];
   }
   if (method === 'homebrew') {
     const prefix = path.split(/\/(?:Cellar|opt)\/marineverse\//)[0]!;
@@ -66,23 +66,34 @@ export function upgradeSteps(method: Installation, root: string): UpgradeStep[] 
   return [];
 }
 
-async function runStep(step: UpgradeStep, output: (message: string) => void): Promise<void> {
+function releaseUnavailable(diagnostics: string): boolean {
+  return (/\bETARGET\b/.test(diagnostics) && /No matching version found for @marineverse\/cli@[^\s]+/i.test(diagnostics))
+    || (/\bE404\b/.test(diagnostics) && /404[^\n]*https?:\/\/[^\s]*\/@marineverse\/cli\/-\/cli-[^\s]+\.tgz(?:[\s?]|$)/i.test(diagnostics));
+}
+
+export async function runUpgradeStep(step: UpgradeStep, output: (message: string) => void, spawnProcess = spawn): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(step.command, step.args, {
+    const child = spawnProcess(step.command, step.args, {
       cwd: step.cwd,
       env: step.prefix ? { ...process.env, npm_config_prefix: step.prefix } : process.env,
       // Windows npm is a .cmd launcher. Only fixed npm arguments go through its shell.
       shell: process.platform === 'win32' && step.command === 'npm',
       stdio: ['inherit', 'pipe', 'pipe'],
     });
-    child.stdout.on('data', chunk => output(String(chunk)));
-    child.stderr.on('data', chunk => output(String(chunk)));
+    // Keep streams separate so interleaved stdout cannot break a split stderr diagnostic.
+    // Forward everything, but retain only a bounded tail for recognizing npm errors.
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { const text = String(chunk); stdout = (stdout + text).slice(-65536); output(text); });
+    child.stderr.on('data', chunk => { const text = String(chunk); stderr = (stderr + text).slice(-65536); output(text); });
     child.once('error', () => reject(new CliError('UPGRADE_FAILED', 'Could not start the package manager. Check that npm or Homebrew is available.')));
-    child.once('close', code => code === 0 ? resolve() : reject(new CliError('UPGRADE_FAILED', 'The package manager could not complete the upgrade. See its output above.')));
+    child.once('close', code => code === 0 ? resolve() : reject(new CliError('UPGRADE_FAILED',
+      step.command === 'npm' && (releaseUnavailable(stdout) || releaseUnavailable(stderr))
+        ? 'The MarineVerse CLI release may not be available from npm yet. Wait a few minutes and run marineverse upgrade again. See the package manager output above.'
+        : 'The package manager could not complete the upgrade. See its output above.')));
   });
 }
 
-export async function upgrade(output: (message: string) => void, root = packageRoot(), runner = runStep): Promise<UpgradeResult> {
+export async function upgrade(output: (message: string) => void, root = packageRoot(), runner = runUpgradeStep): Promise<UpgradeResult> {
   const method = detectInstallation(root, existsSync(join(root, '.git')));
   const steps = upgradeSteps(method, root);
   const command = upgradeCommand(method);

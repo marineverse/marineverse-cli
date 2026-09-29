@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { checkVersion, detectInstallation, newerRelease, upgrade, upgradeSteps, versionMessage } from '../dist/updates.js';
+import { EventEmitter } from 'node:events';
+import { checkVersion, detectInstallation, newerRelease, runUpgradeStep, upgrade, upgradeSteps, versionMessage } from '../dist/updates.js';
 import { VERSION } from '../dist/version.js';
 import { run } from '../dist/cli.js';
 import { CliError } from '../dist/errors.js';
@@ -59,7 +60,7 @@ test('offline, rate limits, and invalid registry responses still report installe
     assert.equal(result.installed, VERSION);
     assert.equal(result.latest, null);
     assert.equal(result.status, 'check_unavailable');
-    assert.equal(result.upgrade_command, 'npm install -g @marineverse/cli@latest');
+    assert.equal(result.upgrade_command, 'npm install -g --prefer-online @marineverse/cli@latest');
     assert.match(versionMessage(result), /Could not check/);
   }
 });
@@ -69,9 +70,9 @@ test('upgrades target the actual installation and never interpolate paths into s
   const runner = async step => { executed.push(step); };
   const npm = await upgrade(() => {}, '/custom prefix/lib/node_modules/@marineverse/cli', runner);
   assert.equal(npm.upgraded, true);
-  assert.deepEqual(executed.splice(0), [{ command: 'npm', args: ['install', '--global', '@marineverse/cli@latest'], prefix: '/custom prefix' }]);
+  assert.deepEqual(executed.splice(0), [{ command: 'npm', args: ['install', '--global', '--prefer-online', '@marineverse/cli@latest'], prefix: '/custom prefix' }]);
   await upgrade(() => {}, '/project with spaces/node_modules/@marineverse/cli', runner);
-  assert.deepEqual(executed.splice(0), [{ command: 'npm', args: ['install', '@marineverse/cli@latest'], cwd: '/project with spaces' }]);
+  assert.deepEqual(executed.splice(0), [{ command: 'npm', args: ['install', '--prefer-online', '@marineverse/cli@latest'], cwd: '/project with spaces' }]);
   await upgrade(() => {}, '/opt/homebrew/Cellar/marineverse/0.1.0/libexec/lib/node_modules/@marineverse/cli', runner);
   assert.deepEqual(executed.splice(0), [
     { command: '/opt/homebrew/bin/brew', args: ['update'] },
@@ -86,6 +87,66 @@ test('upgrades target the actual installation and never interpolate paths into s
     attempts++; throw new CliError('UPGRADE_FAILED', 'Package manager failed');
   }), /Package manager failed/);
   assert.equal(attempts, 1, 'A failed brew update must not proceed to brew upgrade');
+});
+
+function packageManager(chunks, code = 1) {
+  return () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    queueMicrotask(() => {
+      for (const [stream, text] of chunks) child[stream].emit('data', Buffer.from(text));
+      child.emit('close', code);
+    });
+    return child;
+  };
+}
+
+const npmStep = upgradeSteps('npm-global', '/custom/lib/node_modules/@marineverse/cli')[0];
+const missingVersion = 'npm error code ETARGET\nnpm error notarget No matching version found for @marineverse/cli@0.1.99.\n';
+const missingTarball = 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/@marineverse/cli/-/cli-0.1.99.tgz - Not found\n';
+
+test('npm missing CLI releases preserve diagnostics and suggest retrying, including split chunks', async () => {
+  for (const diagnostic of [missingVersion, missingTarball, missingVersion.replaceAll('npm error', 'npm ERR!'), missingTarball.replaceAll('npm error', 'npm ERR!')]) {
+    let output = '';
+    const chunks = [['stderr', 'x'.repeat(100000)], ['stderr', diagnostic.slice(0, 31)],
+      ['stdout', 'progress\n'], ['stderr', diagnostic.slice(31, 78)], ['stderr', diagnostic.slice(78)]];
+    await assert.rejects(runUpgradeStep(npmStep, text => output += text, packageManager(chunks)), error => {
+      assert.equal(error.code, 'UPGRADE_FAILED');
+      assert.match(error.message, /may not be available from npm yet/);
+      assert.match(error.message, /Wait a few minutes and run marineverse upgrade again/);
+      return true;
+    });
+    assert.equal(output, chunks.map(([, text]) => text).join(''));
+  }
+});
+
+test('unrelated npm failures and Homebrew keep the generic failure message; success remains successful', async () => {
+  for (const diagnostic of [
+    missingVersion.replace('@marineverse/cli@', '@other/dependency@'),
+    missingVersion.replace('@marineverse/cli@', '@marineverse/cli-extra@'),
+    missingTarball.replace('@marineverse/cli/', '@other/dependency/'),
+    'npm error code E404\nnpm error 404 https://registry.npmjs.org/@marineverse%2fcli - Not found\n',
+    'npm error code E401\nnpm error Unable to authenticate @marineverse/cli\n',
+    'npm error code ECONNRESET\nnpm error network request for @marineverse/cli failed\n',
+  ]) {
+    await assert.rejects(runUpgradeStep(npmStep, () => {}, packageManager([['stderr', diagnostic]])), /could not complete the upgrade/);
+  }
+  await assert.rejects(runUpgradeStep({ command: 'brew', args: ['update'] }, () => {}, packageManager([['stderr', missingVersion]])), /could not complete the upgrade/);
+  await runUpgradeStep(npmStep, () => {}, packageManager([['stderr', missingVersion]], 0));
+});
+
+test('a missing npm release reaches JSON as UPGRADE_FAILED with exit code 7 and diagnostics on stderr', async () => {
+  let stdout = '', stderr = '';
+  const services = {
+    stdout: text => stdout += text, stderr: text => stderr += text,
+    upgrade: output => upgrade(output, '/custom/lib/node_modules/@marineverse/cli',
+      (step, write) => runUpgradeStep(step, write, packageManager([['stderr', missingTarball]]))),
+  };
+  assert.equal(await run(['node', 'marineverse', 'upgrade', '--json'], services), 7);
+  assert.equal(JSON.parse(stdout).error.code, 'UPGRADE_FAILED');
+  assert.match(JSON.parse(stdout).error.message, /Wait a few minutes and run marineverse upgrade again/);
+  assert.match(stderr, /npm error code E404/);
 });
 
 test('version and upgrade need no API configuration, keep JSON clean, and propagate upgrade failure', async () => {
