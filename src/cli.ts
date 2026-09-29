@@ -172,14 +172,56 @@ export function registerPublicCommands(program: Command, services: Services = de
   browserCommand(feedback, 'open', 'Open the feedback roadmap', () => '/feedback');
   browserCommand(feedbackBoards, 'open <board>', 'Open a feedback board', board => `/feedback/${board}`);
   browserCommand(feedbackPosts, 'open <board> <post>', 'Open a post on the website', (board, post) => `/feedback/${board}/${post}`);
-  const kb = program.command('kb').alias('knowledge-base').description('Search and read the knowledge base (membership required)');
-  kb.command('search <query>').description('Find articles; uses AI tokens to embed your query')
+  const kb = program.command('kb').alias('knowledge-base').description('Search and read sailing knowledge (membership required)');
+  program.command('faq [topic]').description('List public FAQ topics or read a topic without login')
+    .option('--locale <code>', 'Language code, such as en-US')
+    .action((topic, opts, command) => invoke(command, client => topic ? client.content.faq(topic, opts) : client.content.topics(opts)));
+  program.command('history').description('Read MarineVerse Sailing Club updates and development history')
+    .option('--locale <code>', 'Language code, such as en-US')
+    .option('--limit <count>', 'Maximum patch notes, 1–20', '10')
+    .action((opts, command) => invoke(command, client => client.content.history({ locale: opts.locale, limit: Number(opts.limit) })));
+  const sailingClub = program.command('sailing-club').description('MarineVerse Sailing Club product information');
+  const changelog = sailingClub.command('changelog').aliases(['release-notes', 'history']).description('Read public Sailing Club application release notes');
+  const historyOptions = (command: Command) => command.option('--locale <code>', 'Language code, such as en-US')
+    .option('--limit <count>', 'Maximum releases, 1–20')
+    .option('--from-version <version>', 'First included release version').option('--to-version <version>', 'Last included release version')
+    .option('--from-date <date>', 'First included ISO release date').option('--to-date <date>', 'Last included ISO release date')
+    .option('--all', 'Read every release');
+  const releaseOptions = (opts: any) => ({ ...opts, limit: opts.limit === undefined ? (opts.all ? undefined : 10) : Number(opts.limit) });
+  historyOptions(changelog.command('list', { isDefault: true }).description('List recent releases, an inclusive range, or all releases'))
+    .action((opts, command) => invoke(command, client => client.content.changelog(releaseOptions(opts))));
+  changelog.command('latest').description('Read the latest release by release date').option('--locale <code>', 'Language code, such as en-US')
+    .action((opts, command) => invoke(command, client => client.content.changelog({ locale: opts.locale, latest: true })));
+  changelog.command('version <version>').description('Read one exact release version').option('--locale <code>', 'Language code, such as en-US')
+    .action((version, opts, command) => invoke(command, client => client.content.changelog({ locale: opts.locale, version })));
+  const content = program.command('content').description('Search public FAQs and Sailing Club patch notes without login');
+  const clubs = program.command('groups').alias('clubs').description('Find sailing clubs and schools, and manage your memberships');
+  clubs.command('list').alias('my').description('List your memberships and pending join requests')
+    .action(execute(client => client.clubs.list()));
+  clubs.command('join <club>').description('Join a club or request approval using its UUID or slug')
+    .option('--message <text>', 'Message for the club approving your request')
+    .action((club, opts, command) => invoke(command, client => client.clubs.join(club, opts.message)));
+  clubs.command('leave <club>').description('Leave a club using its UUID or slug')
+    .action((club, _opts, command) => invoke(command, client => client.clubs.leave(club)));
+  clubs.command('search [query]').description('Search names, short names or cities, or find nearby clubs')
+    .option('--latitude <degrees>', 'Centre latitude in degrees', Number)
+    .option('--longitude <degrees>', 'Centre longitude in degrees', Number)
+    .option('--radius-km <kilometres>', 'Nearby radius, 1–500 kilometres (default 50)', Number)
+    .option('--type <type>', 'Club type, such as sailability_chapter or federation')
+    .option('--country <code>', 'Two-letter country code, such as AU')
+    .option('--limit <count>', 'Maximum results, 1–50', '10')
+    .action((query, opts, command) => invoke(command, client => client.clubs.search(query, { ...opts, limit: Number(opts.limit) })));
+  content.command('search <query>').description('Find public content by keyword')
+    .option('--locale <code>', 'Language code, such as en-US')
+    .option('--limit <count>', 'Maximum results, 1–20', '5')
+    .action((query, opts, command) => invoke(command, client => client.content.search(query, { locale: opts.locale, limit: Number(opts.limit) })));
+  kb.command('search <query>').description('Find relevant sailing articles')
     .option('--limit <count>', 'Maximum articles, 1–10', '5')
     .action((query, opts, command) => invoke(command, client => client.knowledgeSearch(query, Number(opts.limit))));
-  kb.command('show <article-uuid>').description('Read a full article; no AI token charge')
+  kb.command('show <article-uuid>').description('Read a full article')
     .action((uuid, _opts, command) => invoke(command, client => client.knowledgeArticle(uuid)));
-  const ai = program.command('ai').description('Ask the MarineVerse assistant (membership and AI tokens required)');
-  ai.command('ask <question>').description('Ask a question using your MarineVerse account and AI quota')
+  const ai = program.command('ai').description('Ask the MarineVerse assistant (membership required)');
+  ai.command('ask <question>').description('Ask a question using your MarineVerse account')
     .action((question, _opts, command) => invoke(command, client => client.ask(question)));
   profile.command('show').description('Show your profile (login required)').action(execute(client => client.myProfile()));
   browserCommand(profile, 'open', 'Open your profile on the website', () => '/my-profile');
@@ -252,7 +294,7 @@ export function registerPublicCommands(program: Command, services: Services = de
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
+  for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, content, sailingClub, clubs, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }

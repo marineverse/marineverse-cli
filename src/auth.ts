@@ -86,7 +86,7 @@ export class Auth {
     try {
       const verifier = randomBytes(32).toString('base64url');
       const url = new URL('/oauth/authorize', this.environment.webUrl);
-      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write',
+      url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write clubs_read clubs_write',
         redirect_uri: listener.redirectUri, state: listener.state, code_challenge_method: 'S256',
         code_challenge: createHash('sha256').update(verifier).digest('base64url') }).toString();
       options.announce(url.toString());

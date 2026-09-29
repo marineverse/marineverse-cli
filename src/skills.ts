@@ -11,6 +11,7 @@ export type SkillScope = 'user' | 'project';
 export type SkillAction = 'install' | 'update' | 'uninstall';
 const marker = '.marineverse-skill.json';
 const names = ['SKILL.md', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES'];
+const references = ['setup', 'public-content', 'races', 'account', 'boat-controls', 'feedback', 'limits', 'clubs'].map(name => `references/${name}.md`);
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -26,12 +27,24 @@ async function assertManaged(directory: string): Promise<void> {
   const conflict = () => new CliError('SKILL_CONFLICT', `The skill at ${directory} is unmanaged or modified. Preserve or move it before replacing/removing it.`, 2);
   try {
     if (!(await lstat(directory)).isDirectory()) throw conflict();
-    const entries = await readdir(directory);
-    if (entries.length !== names.length + 1 || entries.some(name => ![...names, marker].includes(name))) throw conflict();
-    for (const name of [...names, marker]) if (!(await lstat(join(directory, name))).isFile()) throw conflict();
+    if (!(await lstat(join(directory, marker))).isFile()) throw conflict();
     const manifest = JSON.parse(await readFile(join(directory, marker), 'utf8'));
     if (manifest.owner !== '@marineverse/cli' || manifest.schema_version !== 1) throw conflict();
-    for (const name of names) if (hash(await readFile(join(directory, name), 'utf8')) !== manifest.files?.[name]) throw conflict();
+    const managed = Object.keys(manifest.files ?? {});
+    const expected = managed.some(name => name.startsWith('references/')) ? [...names, ...references] : names;
+    if (managed.length !== expected.length || managed.some(name => !expected.includes(name))) throw conflict();
+    const entries = await readdir(directory);
+    const top = [...names, marker, ...(expected.length > names.length ? ['references'] : [])];
+    if (entries.length !== top.length || entries.some(name => !top.includes(name))) throw conflict();
+    if (expected.length > names.length) {
+      if (!(await lstat(join(directory, 'references'))).isDirectory()) throw conflict();
+      const entries = await readdir(join(directory, 'references'));
+      if (entries.length !== references.length || entries.some(name => !references.includes(`references/${name}`))) throw conflict();
+    }
+    for (const name of expected) {
+      if (!(await lstat(join(directory, name))).isFile()) throw conflict();
+      if (hash(await readFile(join(directory, name), 'utf8')) !== manifest.files[name]) throw conflict();
+    }
   } catch { throw conflict(); }
 }
 
@@ -65,9 +78,11 @@ export async function manageSkill(action: SkillAction, agent: SkillAgent, scope:
 
     const contents: Record<string, string> = { 'SKILL.md': await bundledSkill() };
     for (const name of names.slice(1)) contents[name] = await readFile(join(packageRoot, name), 'utf8');
+    for (const name of references) contents[name] = await readFile(join(packageRoot, 'skills', 'marineverse-cli', name), 'utf8');
     const manifest = { owner: '@marineverse/cli', schema_version: 1, cli_version: VERSION,
       files: Object.fromEntries(Object.entries(contents).map(([name, content]) => [name, hash(content)])) };
     staged = await mkdtemp(join(parent, '.marineverse-stage-'));
+    await mkdir(join(staged, 'references'));
     for (const [name, content] of Object.entries(contents)) await writeFile(join(staged, name), content, { flag: 'wx' });
     await writeFile(join(staged, marker), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     if (existing) {

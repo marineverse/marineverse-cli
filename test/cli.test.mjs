@@ -271,7 +271,7 @@ test('help and version work offline', async () => {
   assert.equal(bare.code, 0);
   assert.match(bare.stdout, /Usage: marineverse/);
   assert.equal(bare.stderr, '');
-  for (const args of [['help'], ['help', 'globe'], ['globe'], ['globe', 'races'], ['globe', 'boats'], ['globe', 'help', 'boats'], ['auth'], ['config'], ['skills'], ['profile'], ['progress'], ['stats']]) {
+  for (const args of [['help'], ['help', 'globe'], ['globe'], ['globe', 'races'], ['globe', 'boats'], ['globe', 'help', 'boats'], ['auth'], ['config'], ['skills'], ['profile'], ['progress'], ['stats'], ['sailing-club'], ['groups'], ['clubs']]) {
     const group = await cli(...args);
     assert.equal(group.code, 0, args.join(' '));
     assert.match(group.stdout, /Usage: marineverse/);
@@ -343,7 +343,7 @@ test('old sessions can read their profile and are told to log in again for progr
   const auth = await signedIn(false, ['public', 'globe_read', 'globe_write']);
   assert.equal((await cli('profile', 'show')).code, 0);
   requests = [];
-  for (const args of [['progress', 'show'], ['stats', 'distance']]) {
+  for (const args of [['progress', 'show'], ['stats', 'distance'], ['clubs', 'list'], ['clubs', 'join', 'test-club'], ['clubs', 'leave', 'test-club']]) {
     const result = await cli(...args, '--json');
     assert.equal(result.code, 3);
     assert.equal(result.json().error.code, 'AUTH_REQUIRED');
@@ -694,7 +694,7 @@ test('browser login uses frontend consent with S256 then exchanges code and stor
   assert.equal(authorized.origin, environment.webUrl);
   assert.equal(authorized.pathname, '/oauth/authorize');
   assert.equal(authorized.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write');
+  assert.equal(authorized.searchParams.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write clubs_read clubs_write');
   const exchange = new URLSearchParams(requests.find(r => r.path === '/oauth/token').body);
   assert.equal(exchange.get('code'), 'one-use-code');
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), authorized.searchParams.get('code_challenge'));

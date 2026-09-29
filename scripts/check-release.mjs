@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
@@ -45,7 +45,7 @@ for (const [name, dependency] of Object.entries(lock.packages)) {
   if (dependency.resolved && !dependency.resolved.startsWith('https://registry.npmjs.org/')) failures.push(`Non-public dependency source: ${name}`);
 }
 const legalFiles = ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES'];
-assert.deepEqual(manifest.files, ['bin/', 'dist/', 'skills/marineverse-cli/SKILL.md', 'README.md', ...legalFiles]);
+assert.deepEqual(manifest.files, ['bin/', 'dist/', 'skills/marineverse-cli/', 'README.md', ...legalFiles]);
 assert.equal(manifest.license, 'Apache-2.0');
 assert.equal(lock.packages[''].license, manifest.license);
 assert.equal(lock.version, manifest.version);
@@ -56,11 +56,15 @@ const npm = process.env.npm_execpath;
 assert.ok(npm, 'Run through npm run check:release.');
 const [pack] = JSON.parse(execFileSync(process.execPath, [npm, 'pack', '--dry-run', '--ignore-scripts', '--json'], { encoding: 'utf8' }));
 for (const { path } of pack.files) {
-  if (!legalFiles.includes(path) && !/^(package\.json|README\.md|skills\/marineverse-cli\/SKILL\.md|bin\/marineverse\.js|dist\/[a-z-]+\.(js|d\.ts))$/.test(path)) failures.push(`Unexpected package file: ${path}`);
+  if (!legalFiles.includes(path) && !/^(package\.json|README\.md|skills\/marineverse-cli\/(SKILL\.md|references\/[a-z-]+\.md)|bin\/marineverse\.js|dist\/[a-z-]+\.(js|d\.ts))$/.test(path)) failures.push(`Unexpected package file: ${path}`);
   if (forbiddenContent.some(pattern => pattern.test(readFileSync(path, 'utf8')))) failures.push(`Potential private data in package: ${path}`);
 }
 assert.ok(pack.files.some(file => file.path === 'dist/cli.js'), 'Build output is missing.');
 assert.ok(pack.files.some(file => file.path === 'skills/marineverse-cli/SKILL.md'), 'Bundled skill is missing.');
+for (const reference of readdirSync('skills/marineverse-cli/references')) {
+  const path = `skills/marineverse-cli/references/${reference}`;
+  assert.ok(pack.files.some(file => file.path === path), `Missing skill reference: ${path}`);
+}
 for (const path of legalFiles) assert.ok(pack.files.some(file => file.path === path), `Missing package legal file: ${path}`);
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }
 else console.log(`Checked ${candidates.length} Git candidates and ${pack.files.length} npm files. No excluded files or recognized credential patterns found. Manual review remains required.`);

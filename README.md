@@ -23,7 +23,7 @@ Give Codex or Claude Code [the MarineVerse CLI skill](skills/marineverse-cli/SKI
 
 > Install this MarineVerse CLI skill for yourself, then use it to install and configure the MarineVerse CLI. Verify it by listing public Globe races. Let me complete browser login if my next task needs an account.
 
-The skill includes setup instructions and works before the CLI is installed. It installs the published npm package, or uses an existing checkout when requested. It preserves existing configuration and does not change boats during setup. Node 24+ is required; the agent will report missing prerequisites.
+The skill routes to focused references for setup and each sailing workflow. Give the agent the whole skill directory or repository link so it can read those references before the CLI is installed. It installs the published npm package, or uses an existing checkout when requested. Node 24+ is required; existing configuration and custom skills are preserved.
 
 The shareable skill URL is:
 
@@ -31,7 +31,7 @@ The shareable skill URL is:
 https://raw.githubusercontent.com/marineverse/marineverse-cli/master/skills/marineverse-cli/SKILL.md
 ```
 
-For a stable release, replace `master` with its tag or commit. You can also give your agent the local `skills/marineverse-cli/SKILL.md` file and checkout path.
+For a stable release, replace `master` with its tag or commit. Linked references must come from that same ref. You can also give your agent the local `skills/marineverse-cli/` directory and checkout path.
 
 Once the CLI is available, these helpers install the bundled skill into the current user's agent directory:
 
@@ -42,7 +42,7 @@ node ./bin/marineverse.js skills update --agent codex
 node ./bin/marineverse.js skills uninstall --agent codex
 ```
 
-Add `--scope project` to use the current project's `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code). Personal installs use those directories under your home folder. The skill directory is named `marineverse-cli`; existing `marineverse` skills are preserved. The helpers work offline, include legal notices, and never install the CLI or log in automatically. Updates use the skill bundled with the installed CLI; upgrade the CLI first to obtain a newer skill. Modified, manually installed, symlinked, or extra-file copies are preserved and reported as conflicts. Only installations created by the helper can be updated or removed by it. `skills show` prints the complete instructions without installing anything.
+Add `--scope project` to use the current project's `.agents/skills/` (Codex) or `.claude/skills/` (Claude Code). Personal installs use those directories under your home folder. The skill directory is named `marineverse-cli`; existing `marineverse` skills are preserved. The helpers work offline, include all linked references and legal notices, and never install the CLI or log in automatically. Updates use the skill bundled with the installed CLI; upgrade the CLI first to obtain a newer skill. Modified, manually installed, symlinked, or extra-file copies are preserved and reported as conflicts. Only installations created by the helper can be updated or removed by it. `skills show` prints the entrypoint and links to focused references without installing anything.
 
 ## Run from this checkout
 
@@ -158,9 +158,56 @@ marineverse feedback comments unvote COMMENT_UUID
 marineverse feedback comments delete COMMENT_UUID
 ```
 
-Creating a post also upvotes it. You can edit your own posts and edit or delete your own comments; deleting a comment also removes its replies. Replies are one level deep. Merged posts are read-only. Private boards are not exposed. Feedback requires no paid membership. Writes are never automatically retried.
+Creating a post also upvotes it. You can edit your own posts and edit or delete your own comments; deleting a comment also removes its replies. Replies are one level deep. Merged posts are read-only. Private boards are not exposed. Writes are never automatically retried.
 
 Operators: deploy the v3 feedback API and frontend OAuth permission descriptions, then run the server's `marineverse_cli:register` task to add `feedback_read` and `feedback_write` to the existing CLI application. No database migration is needed for feedback. Existing CLI users run `marineverse login` again to grant the new permissions.
+
+## Find sailing clubs and schools
+
+Discover real clubs, schools, Sailability chapters, federations, class associations and teams without login:
+
+```sh
+marineverse groups search "Melbourne" --type sailing_school
+marineverse groups search "Royal Yachting Association" --json
+marineverse groups search --latitude -37.8 --longitude 144.9 --radius-km 50 --country AU
+```
+
+Results include each organization's name, description and canonical MarineVerse page. Nearby results include distance in kilometers. Use returned links to review details; the directory is not exhaustive. Name/city searches can include organizations without mapped locations. Coordinates must be paired signed degrees; never invent a location or distance. Radius defaults to 50 km with coordinates and accepts 1–500; an explicit radius requires coordinates. Queries accept up to 200 characters. `--limit` defaults to 10 and accepts 1–50; `--country` is an ISO two-letter code. Types are `yacht_club`, `sailing_school`, `sailability_chapter`, `federation`, `class_association`, `team` and `other`.
+
+List and manage your club memberships with normal login:
+
+```sh
+marineverse login
+marineverse groups list --json
+marineverse groups join CLUB_UUID_OR_SLUG --message "I'd like to join your club."
+marineverse groups leave CLUB_UUID_OR_SLUG
+```
+
+Use a public UUID or slug returned by search or your club list. `clubs` is an alias for `groups`. The list includes pending requests. Open clubs join immediately; approval-required clubs create a pending request; invite-only clubs refuse joining. Join messages accept up to 10,000 characters. Leaving removes an active membership; pending request cancellation is unsupported, and the last admin cannot leave. These account operations require login. If an older session needs updated permissions, run `marineverse login` again.
+
+Operators: deploy the club membership API and frontend consent descriptions, then run `bin/rails marineverse_cli:register` to add `clubs_read` and `clubs_write` to the existing CLI application.
+
+## Public FAQs and history
+
+```sh
+marineverse faq                         # Discover public FAQ topics
+marineverse faq marineverse-sailing-club # Read a topic from the catalog
+marineverse history --limit 5
+marineverse sailing-club changelog latest
+marineverse sailing-club changelog version 2.9.7
+marineverse sailing-club changelog list --from-version 2.4.0 --to-version 2.9.7
+marineverse sailing-club release-notes list --from-date 2025-01-01 --to-date 2025-12-31
+marineverse sailing-club changelog list --all
+marineverse content search "multiplayer" --json
+```
+
+These guest commands read first-party FAQs and Sailing Club updates without login. Answers retain their source URLs and links; JSON includes the original rich content. `history` shows the latest ten major updates and patch notes by default. Search is a keyword search across FAQs and history, with five results by default. Both accept `--limit 1` through `20`; FAQ details, history, and search accept `--locale en-US` (unsupported languages fall back to English).
+
+Search includes English alongside the requested language and reports the actual language of each result, without repeating the same question or release.
+
+`sailing-club changelog` (also `release-notes` or `history`) reads application release notes only, with ten recent releases by default. Version and ISO date ranges include both endpoints; `latest` uses the release date. `list --all` returns the complete archive. These are Sailing Club releases, separate from the CLI's own version.
+
+Use public content for product, setup, and release questions; use the knowledge base or MarineVerse AI for deeper sailing guidance.
 
 ## Knowledge base and AI
 
@@ -174,7 +221,7 @@ marineverse ai ask "How can I improve my sailing?"
 
 `knowledge-base` is an alias for `kb`. Search returns matching article titles, excerpts, and UUIDs; `show` returns the full article. Both KB and AI require an active MarineVerse membership. If needed, [manage your membership](https://www.marineverse.com/my-profile?tab=billing).
 
-Search deducts the embedding provider's reported token usage from your AI quota, including searches with no matches. Reading an article consumes no AI tokens. `ai ask` uses the same assistant and AI quota as the website. JSON search and AI results include `tokens.consumed` and `tokens.remaining`.
+`ai ask` uses the same assistant as the website.
 
 Articles default to `public` (available to members). `admin` articles are only available to admins, and `internal` articles are used by AI but never returned by `kb search/show`. Internal content may inform an AI answer; this visibility is not a place to store secrets.
 
@@ -182,7 +229,7 @@ Articles default to `public` (available to members). `admin` articles are only a
 
 Deploy the server changes and run `bin/rails db:migrate` to add article UUIDs and visibility. Existing articles become public; review their visibility in the admin before making the KB endpoints available to members. Then run `bin/rails marineverse_cli:register` in each target environment. This updates the existing CLI application without changing its public client ID, adding `kb_read` and `ai_ask` to its permissions. Deploy the frontend consent descriptions. Users then run normal `marineverse login` again.
 
-The authenticated v3 endpoints are `POST /api/v3/knowledge_base/search` (`query`, optional integer `limit`, default 5, maximum 10), `GET /api/v3/knowledge_base/:uuid`, and `POST /api/v3/ai/ask` (`question`). Search accepts up to 2,000 characters; AI accepts up to 8,000. Search and AI use POST because they consume quota, and the CLI never automatically retries them. They allow up to 120 seconds client-side, subject to the server's AI request timeout. Requests are limited to 10 per minute per account per controller using the server's Rack::Attack cache store; use a shared cache to enforce this across workers.
+The authenticated v3 endpoints are `POST /api/v3/knowledge_base/search` (`query`, optional integer `limit`, default 5, maximum 10), `GET /api/v3/knowledge_base/:uuid`, and `POST /api/v3/ai/ask` (`question`). Search accepts up to 2,000 characters; AI accepts up to 8,000. Search and AI use POST. They allow up to 120 seconds client-side, subject to the server's AI request timeout. Requests are limited to 10 per minute per account per controller using the server's Rack::Attack cache store; use a shared cache to enforce this across workers.
 
 ## Try it
 

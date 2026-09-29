@@ -21,6 +21,7 @@ test('both agents install, update, and uninstall only in the requested scope', a
         assert.equal(installed.path, skillDirectory(agent, scope, paths.home, paths.cwd));
         assert.equal(await readFile(join(installed.path, 'SKILL.md'), 'utf8'), await bundledSkill());
         assert.match(await readFile(join(installed.path, 'LICENSE'), 'utf8'), /Apache License/);
+        assert.match(await readFile(join(installed.path, 'references', 'clubs.md'), 'utf8'), /groups search/);
         assert.equal((await manageSkill('install', agent, scope, paths)).status, 'already_installed');
         assert.equal((await manageSkill('update', agent, scope, paths)).status, 'updated');
         assert.equal((await manageSkill('uninstall', agent, scope, paths)).status, 'uninstalled');
@@ -31,12 +32,18 @@ test('both agents install, update, and uninstall only in the requested scope', a
   });
 });
 
-test('customized, unmanaged, and extra-file skills survive every operation', async () => {
-  for (const mode of ['customized', 'unmanaged', 'extra']) await isolated(async paths => {
+test('customized, unmanaged, extra-file and custom-reference skills survive every operation', async () => {
+  for (const mode of ['customized', 'unmanaged', 'extra', 'reference', 'extra-reference', 'symlink-reference']) await isolated(async paths => {
     const { path } = await manageSkill('install', 'codex', 'project', paths);
     if (mode === 'customized') await writeFile(join(path, 'SKILL.md'), 'User customization');
     if (mode === 'unmanaged') await rm(join(path, '.marineverse-skill.json'));
     if (mode === 'extra') await writeFile(join(path, 'personal-notes.md'), 'Keep this');
+    if (mode === 'reference') await writeFile(join(path, 'references', 'clubs.md'), 'User reference customization');
+    if (mode === 'extra-reference') await writeFile(join(path, 'references', 'personal.md'), 'Keep this reference');
+    if (mode === 'symlink-reference') {
+      await rm(join(path, 'references', 'clubs.md'));
+      await symlink(join(path, 'SKILL.md'), join(path, 'references', 'clubs.md'));
+    }
     const before = await readdir(path);
     const content = await readFile(join(path, 'SKILL.md'), 'utf8');
     for (const action of ['install', 'update', 'uninstall']) {
@@ -56,6 +63,19 @@ test('symlinked project agent directories cannot redirect skill operations', asy
       await assert.rejects(manageSkill(action, 'codex', 'project', paths), { code: 'SKILL_CONFLICT' });
       assert.deepEqual(await readdir(paths.home), []);
     }
+  });
+});
+
+test('legacy managed single-file skills upgrade with references', async () => {
+  await isolated(async paths => {
+    const { path } = await manageSkill('install', 'codex', 'project', paths);
+    const marker = join(path, '.marineverse-skill.json');
+    const manifest = JSON.parse(await readFile(marker, 'utf8'));
+    await rm(join(path, 'references'), { recursive: true });
+    for (const name of Object.keys(manifest.files)) if (name.startsWith('references/')) delete manifest.files[name];
+    await writeFile(marker, JSON.stringify(manifest));
+    assert.equal((await manageSkill('update', 'codex', 'project', paths)).status, 'updated');
+    assert.match(await readFile(join(path, 'references', 'clubs.md'), 'utf8'), /groups search/);
   });
 });
 

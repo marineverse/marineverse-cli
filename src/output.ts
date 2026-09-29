@@ -38,12 +38,46 @@ function selected(kind: TableKind, columns: [string, (row: any) => unknown][], n
   return names ? names.map(name => columns[columnNames[kind].indexOf(name)]!) : columns;
 }
 
+function richText(value: any, source: string): string {
+  if (typeof value === 'string') return value.split('\n').map(safe).join('\n');
+  if (Array.isArray(value)) return value.map(node => richText(node, source)).join('');
+  if (!value || typeof value !== 'object') return '';
+  if (value.type === 'br') return '\n';
+  const text = richText(value.children, source);
+  if (typeof value.props?.href === 'string') {
+    let href = value.props.href;
+    try { href = new URL(href, source).href; } catch { /* Retain a readable source value. */ }
+    return `${text} (${safe(href)})`;
+  }
+  return value.type === 'p' ? `${text}\n\n` : text;
+}
+
 export function human(data: any, columns?: string[]): string {
+  if (data.topics) return table(data.topics, [['TOPIC', topic => topic.slug], ['TITLE', topic => topic.title], ['URL', topic => topic.url]]);
+  if (data.faq) {
+    const faq = data.faq;
+    return `${safe(faq.title)}\nSource: ${safe(faq.source || faq.url)}\n\n${faq.content.sections.map((section: any) =>
+      `${safe(section.section)}\n\n${(section.items || []).map((item: any) => `${safe(item.question)}\n${richText(item.answer, faq.source || faq.url).trim()}`).join('\n\n')}`).join('\n\n')}${faq.content.footer ? `\n\n${richText(faq.content.footer, faq.source || faq.url).trim()}` : ''}`;
+  }
+  if (data.history) {
+    const history = data.history;
+    const labels = history.content.labels || {};
+    const updates = (history.content.sections || []).map((section: any) =>
+      `${safe(labels[section.titleKey] || section.titleKey)}\n${(section.cards || []).map((card: any) =>
+        `${safe(labels[card.titleKey] || card.titleKey)} · ${safe(labels[card.dateKey] || card.dateKey)}\n${safe(card.href)}`).join('\n\n')}`).join('\n\n');
+    return `${safe(history.title)}\nSource: ${safe(history.source || history.url)}${updates ? `\n\n${updates}` : ''}\n\nPatch notes\n\n${history.content.entries.map((entry: any) =>
+      `${safe(entry.version)} · ${safe(entry.date || entry.released_on)}\n${(entry.items || []).map((item: any) => `- ${safe(item)}`).join('\n')}`).join('\n\n') || 'No patch notes found.'}`;
+  }
+  if (data.search) return data.search.results.map((result: any) =>
+    `${safe(result.title)}${result.version ? ` (${safe(result.version)})` : ''}\n${safe(result.snippet)}\nSource: ${safe(result.url || result.source)}`).join('\n\n') || 'No matching public content found.';
   if (data.links) return table(data.links, [['NAME', link => link.name], ['TITLE', link => link.title], ['DESCRIPTION', link => link.description], ['URL', link => link.url]]);
   const paragraphs = (value: string) => value.split('\n').map(safe).join('\n');
   const postTable = (posts: any[]) => table(posts, [['BOARD', p => p.board_slug], ['POST', p => p.slug], ['TITLE', p => p.title], ['STATUS', p => p.status], ['VOTES', p => p.vote_count], ['COMMENTS', p => p.comment_count], ['UPVOTED', p => p.upvoted_by_me]]);
   const pagination = (value: any) => `Page ${safe(value.current_page)} of ${safe(value.total_pages)} · ${safe(value.total_entries)} results`;
   const commentText = (comment: any): string => `${safe(comment.author?.name)} · ${safe(comment.uuid)} · ${safe(comment.vote_count)} votes${comment.is_pinned ? ' · pinned' : ''}\n${paragraphs(comment.content)}${comment.replies?.length ? `\n\nReplies:\n${comment.replies.map(commentText).join('\n\n')}` : ''}`;
+  if (data.memberships && data.pending_requests) return `Memberships\n${table(data.memberships, [['CLUB', e => e.club.slug || e.club.uuid], ['NAME', e => e.club.name], ['ROLE', e => e.role], ['STATUS', e => e.status]])}\n\nPending requests\n${table(data.pending_requests, [['CLUB', e => e.club.slug || e.club.uuid], ['NAME', e => e.club.name], ['STATUS', e => e.status], ['MESSAGE', e => e.message]])}`;
+  if (data.club && ['joined', 'pending_approval', 'left'].includes(data.status)) return `${data.status === 'joined' ? 'Joined' : data.status === 'pending_approval' ? 'Join request pending approval for' : 'Left'} ${safe(data.club.name)} (${safe(data.club.slug || data.club.uuid)}).`;
+  if (data.clubs) return table(data.clubs, [['CLUB', c => c.slug || c.uuid], ['NAME', c => c.name], ['DESCRIPTION', c => c.description], ['MARINEVERSE URL', c => c.url], ...(data.clubs.some((c: any) => c.distance_km !== undefined) ? [['DISTANCE (km)', (c: any) => rounded(c.distance_km)] as [string, (row: any) => unknown]] : [])]);
   if (data.boards) return table(data.boards, [['BOARD', b => b.slug], ['NAME', b => b.name], ['POSTS', b => b.post_count], ['DESCRIPTION', b => b.description]]);
   if (data.roadmap) return [['planned', 'Planned'], ['in_progress', 'In progress'], ['complete', 'Complete']].map(([key, name]) => `${name}\n${postTable(data.roadmap[key!])}`).join('\n\n');
   if (data.posts) return `${data.name ? `${safe(data.name)}\n` : ''}${postTable(data.posts)}${data.current_page === undefined ? '' : `\n${pagination(data)}`}`;

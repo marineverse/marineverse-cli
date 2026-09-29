@@ -3,6 +3,8 @@ import { Auth } from './auth.js';
 import { CliError, usage } from './errors.js';
 import { request } from './http.js';
 import { FeedbackClient } from './feedback.js';
+import { ContentClient } from './content.js';
+import { ClubsClient } from './clubs.js';
 
 function object(value: any): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CliError('INVALID_RESPONSE', 'Unexpected API response structure.');
@@ -63,9 +65,13 @@ function metric(value: unknown): number | null {
 export class MarineVerseClient {
   readonly auth: Auth;
   readonly feedback: FeedbackClient;
+  readonly content: ContentClient;
+  readonly clubs: ClubsClient;
   constructor(readonly environment: Environment) {
     this.auth = new Auth(environment);
     this.feedback = new FeedbackClient(this.auth);
+    this.content = new ContentClient(environment.apiUrl);
+    this.clubs = new ClubsClient(environment.apiUrl, this.auth);
   }
   private publicGet(path: string) { return request(`${this.environment.apiUrl}/api/v2/globe${path}`); }
 

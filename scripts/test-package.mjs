@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -28,6 +28,9 @@ try {
     const installed = JSON.parse(cli(['skills', 'install', ...args])).data;
     assert.equal(installed.status, 'installed');
     assert.equal(await readFile(join(installed.path, 'SKILL.md'), 'utf8'), skill);
+    for (const reference of await readdir('skills/marineverse-cli/references')) {
+      assert.equal(await readFile(join(installed.path, 'references', reference), 'utf8'), await readFile(join('skills/marineverse-cli/references', reference), 'utf8'));
+    }
     assert.equal(JSON.parse(cli(['skills', 'update', ...args])).data.status, 'updated');
     assert.equal(JSON.parse(cli(['skills', 'uninstall', ...args])).data.status, 'uninstalled');
   }
