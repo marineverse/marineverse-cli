@@ -276,7 +276,17 @@ node ./bin/marineverse.js --env local globe boats rename YOUR_BOAT_UUID --name "
 node ./bin/marineverse.js --env local auth logout
 ```
 
-Login opens the existing website login/consent page, using authorization code + S256 PKCE and a short-lived loopback listener. `auth login --no-browser` prints a link to open in a browser on the same computer; this is not a remote device-code flow. The CLI never asks for your MarineVerse password. It refreshes tokens as needed.
+In a terminal, login asks how you want to sign in. Press Enter to open a browser on the same computer, or choose device code login for a remote or headless machine.
+
+```sh
+marineverse login                  # choose interactively (Enter = browser)
+marineverse login --browser        # browser login without asking
+marineverse login --device-auth --no-browser  # approve from another device
+```
+
+For device login, open the printed URL on any device, sign in, check that the code matches your terminal, and approve. Keep the CLI running until login finishes. Codes expire after 15 minutes; press Ctrl+C to cancel.
+
+`--no-browser` prevents opening a browser; it does not select the login method. Scripts and `--json` never prompt, so pass `--device-auth` for remote login. The CLI never asks for your MarineVerse password.
 
 Heading and sail changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
 
@@ -291,8 +301,6 @@ marineverse globe boats show BOAT_UUID --columns name,latitude,longitude,main,ji
 ```
 
 Sail levels range from `0` (fully lowered) to `1` (fully raised). `set-sails` changes only the sails you specify. In Globe, both sails below `0.05` means anchored: `drop-anchor` and `lower-sails` set both to zero. `raise-sails` sets both to one and resumes sailing. There is no separate anchor toggle. Commands send one update, then read back the result; `--json` includes the requested change and verification status.
-
-Before using these commands against production, deploy the backend change that allows `mainsail_hoist` and `jib_hoist` on the existing OAuth boat-update endpoint. No database migration, new OAuth scope, or additional login configuration is needed.
 
 `marineverse login` is also available as a shortcut for `marineverse auth login`, with the same options.
 
@@ -315,9 +323,9 @@ Settings live in `~/.config/marineverse/config.json` on macOS/Linux (`$XDG_CONFI
 
 Tokens default to the OS credential store: macOS Keychain, Windows Credential Manager, or an available Linux credential service. If unavailable, login reports the failure. Unix users may explicitly choose `auth login --storage file`; tokens then live in private files under the configuration directory (0700 directory, 0600 files). Windows uses the credential store, not file mode. Account metadata identifies which store and user are active. Credentials are isolated by configuration directory, environment, API origin, client ID, and account.
 
-Configuration precedence is command flags, `MARINEVERSE_ENV` / `MARINEVERSE_API_URL` / `MARINEVERSE_WEB_URL` / `MARINEVERSE_CLIENT_ID`, saved settings, then built-in defaults. An API-origin override does not inherit another origin's OAuth credentials. Only loopback development origins can use HTTP. `auth logout` removes local credentials and reports whether server revocation was confirmed.
+`auth status` verifies the session with the API, which may refresh and save tokens. `auth status --local` only reads the stored identity, scopes, and expiry: no network access, refresh, or writes.
 
-The design borrows user configuration and named-environment conventions from [Google Cloud CLI](https://docs.cloud.google.com/sdk/docs/configurations), and explicit credential storage and browser login patterns from [Codex](https://learn.chatgpt.com/docs/auth).
+Configuration precedence is command flags, `MARINEVERSE_ENV` / `MARINEVERSE_API_URL` / `MARINEVERSE_WEB_URL` / `MARINEVERSE_CLIENT_ID`, saved settings, then built-in defaults. An API-origin override does not inherit another origin's OAuth credentials. Only loopback development origins can use HTTP. `auth logout` removes local credentials and reports whether server revocation was confirmed.
 
 ## Automation and HTTP behavior
 

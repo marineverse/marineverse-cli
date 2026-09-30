@@ -1,11 +1,11 @@
 import { Command, CommanderError, Option } from 'commander';
 import { configDir, readConfig, resolveEnvironment, selectEnvironment, setEnvironment, type Environment, type GlobalOptions } from './config.js';
 import { MarineVerseClient } from './client.js';
-import { CliError, usage } from './errors.js';
+import { CliError, errno, usage } from './errors.js';
 import { human, safe, columnNames, validateColumns, type TableKind } from './output.js';
 import { VERSION } from './version.js';
 import { checkVersion, versionMessage, upgrade, type VersionInfo, type UpgradeResult } from './updates.js';
-import { openBrowser } from './auth.js';
+import { openBrowser, chooseLoginMethod, confirmDeviceLogin, type LoginMethod } from './auth.js';
 import { bundledSkill, manageSkill, type SkillAction } from './skills.js';
 import { feedbackFilters, feedbackSorts, roadmapFilters } from './feedback.js';
 import { marineverseLinks } from './links.js';
@@ -17,6 +17,9 @@ export interface Services {
   openBrowser?: (url: string) => Promise<void>;
   checkVersion?: () => Promise<VersionInfo>;
   upgrade?: (output: (message: string) => void) => Promise<UpgradeResult>;
+  isInteractive?: () => boolean;
+  chooseLoginMethod?: () => Promise<LoginMethod | undefined>;
+  confirmDeviceLogin?: () => Promise<boolean>;
 }
 const defaults: Services = { client: environment => new MarineVerseClient(environment), stdout: message => process.stdout.write(message), stderr: message => process.stderr.write(message) };
 
@@ -116,14 +119,40 @@ export function registerPublicCommands(program: Command, services: Services = de
     await invoke(command, async client => client.environment);
   });
   const auth = program.command('auth').description('Sign in through the MarineVerse website');
+  // --browser and --no-browser share one value, which stays undefined unless either is given:
+  // only --no-browser (false) stops the browser launch; only an explicit --browser (true) skips the chooser.
   const registerLogin = (parent: Command) => parent.command('login').description('Sign in through the MarineVerse website')
-    .option('--no-browser', 'Print a URL to open on this machine')
+    .option('--no-browser', 'Print the sign-in URL without opening a browser')
+    .option('--browser', 'Use browser login on this computer without asking')
+    .option('--device-auth', 'Use device code login from another browser or device (remote or headless) without asking')
     .addOption(new Option('--storage <mode>', 'Credential storage (file is Unix-only)').choices(['keyring', 'file']).default('keyring'))
-    .action(async (opts, command) => invoke(command, client => client.auth.login({ browser: opts.browser, storage: opts.storage,
-      announce: url => services.stderr(`Open this MarineVerse page to authorize the CLI:\n${url}\n`) })));
+    .action(async (opts, command) => {
+      const browserFlag = opts.browser === true;
+      const browser = opts.browser !== false;
+      if (browserFlag && opts.deviceAuth) usage('Choose either --browser or --device-auth.');
+      // Scripts and --json never wait on the chooser; they keep the existing browser login.
+      const interactive = !command.optsWithGlobals().json && (services.isInteractive || (() => !!process.stdin.isTTY && !!process.stderr.isTTY))();
+      const method = opts.deviceAuth ? 'device' : browserFlag || !interactive ? 'browser' : await (services.chooseLoginMethod || chooseLoginMethod)();
+      if (!method) throw new CliError('AUTH_CANCELLED', 'Login cancelled.', 3);
+      const deviceLogin = (client: MarineVerseClient) => client.auth.deviceLogin({ browser, storage: opts.storage,
+        announce: (url, code, expiresIn) => services.stderr(`Open this MarineVerse page on any device and enter the code:\n${url}\n\n  ${code}\n\nThe code expires in ${Math.round(expiresIn / 60)} minutes. Waiting for approval...\n`) });
+      return invoke(command, async client => {
+        if (method === 'device') return deviceLogin(client);
+        try {
+          return await client.auth.login({ browser, storage: opts.storage,
+            announce: url => services.stderr(`Open this MarineVerse page to authorize the CLI:\n${url}\nIf the browser cannot reach this computer, run marineverse login --device-auth instead.\n`) });
+        } catch (error) {
+          // login() has closed its listener by now, so only one grant is ever active; never switch without asking.
+          if (!(error instanceof CliError) || error.code !== 'AUTH_TIMEOUT' || !interactive || !await (services.confirmDeviceLogin || confirmDeviceLogin)()) throw error;
+          return deviceLogin(client);
+        }
+      });
+    });
   registerLogin(auth);
   registerLogin(program);
-  auth.command('status').description('Verify the session and show identity, scopes, and expiry').action(execute(client => client.auth.status()));
+  auth.command('status').description('Verify the session and show identity, scopes, and expiry (may refresh and save tokens)')
+    .option('--local', 'Show stored identity, scopes, and expiry without network access or token refresh')
+    .action((opts, command) => invoke(command, client => opts.local ? client.auth.localStatus() : client.auth.status()));
   auth.command('logout').description('Revoke credentials and remove the local copy').action(execute(client => client.auth.logout()));
   const profile = program.command('profile').description('Your MarineVerse profile');
   const feedback = program.command('feedback').description('Browse the roadmap and discuss feedback');
@@ -318,8 +347,12 @@ export async function run(argv: string[], services: Services = defaults): Promis
   }
   catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
+    const syscall = (error as NodeJS.ErrnoException)?.syscall;
     const failure = error instanceof CliError ? error : error instanceof CommanderError
-      ? new CliError('INVALID_USAGE', error.message, 2) : new CliError('INTERNAL_ERROR', 'Operation failed. Check your configuration and credential store.');
+      ? new CliError('INVALID_USAGE', error.message, 2)
+      : errno(error) !== 'unknown error'
+        ? new CliError('FILESYSTEM_ERROR', `A local file operation failed (${errno(error)}${typeof syscall === 'string' && /^[a-z]+$/.test(syscall) ? ` during ${syscall}` : ''}). Check permissions under ${configDir()}.`, 2)
+        : new CliError('INTERNAL_ERROR', 'Operation failed. Check your configuration and credential store.');
     if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message: failure.message, retry_after_seconds: failure.retryAfterSeconds } })}\n`);
     else services.stderr(`${failure.code}: ${safe(failure.message)}\n`);
     return failure.exitCode;

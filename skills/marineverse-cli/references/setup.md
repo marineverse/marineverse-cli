@@ -25,7 +25,11 @@ The skill does not itself install a runtime or executable just by being loaded. 
 - Use `--env local` only when the user requests local development. Defaults are API `http://localhost:3000` and website `http://localhost:3005`. The operator supplies that server's separate public client ID. Configure it with `config set local --api-url http://localhost:3000 --web-url http://localhost:3005 --client-id LOCAL_CLIENT_ID`; this selects local. Never substitute the production registration or fall back to production after a local failure.
 - Verify connectivity with `marineverse globe races list --json`, adding an environment flag only when needed. This read does not change boat state.
 - Public races and boat profiles need no login. For requested private reads or controls, check `auth status --json`; if login is needed, run `marineverse login` for the same environment and let the user complete the website login/consent. Login requests all supported permissions. If an older session lacks access to progress or stats, run normal login again; there are no per-feature scope switches. Never request passwords or copy tokens into chat or skill files.
-- Browser login must return to the machine running the CLI. `login --no-browser` prints a URL for a browser on that machine; it is not a remote device-code login. If the agent runs remotely, explain this constraint before starting a login that cannot complete.
+- Choose the login method explicitly, because agent shells are usually not interactive terminals and login then never prompts:
+  - `marineverse login --browser` when the user's browser runs on the same machine as the CLI. The browser must reach `127.0.0.1` on that machine; `--no-browser` only prints the URL instead of opening it.
+  - `marineverse login --device-auth --no-browser` when the CLI runs remotely or the browser cannot reach it. Relay the printed URL and short code exactly as shown on stderr; the user opens it on any device, checks the code, and approves. Keep the command running until it exits. Codes expire after 15 minutes.
+- Never retry login in a loop or start a second login while one is waiting. Report login or storage errors to the user; do not switch storage modes without their approval.
+- Use `marineverse auth status --local --json` to inspect a stored session without network access; plain `auth status` verifies it with MarineVerse.
 
 ## Version checks and upgrades
 

@@ -1,7 +1,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -12,13 +12,14 @@ import { setEnvironment, resolveEnvironment } from '../dist/config.js';
 import { Auth, callback } from '../dist/auth.js';
 import { request, retryAfterSeconds } from '../dist/http.js';
 import { callbackPage } from '../dist/callback-page.js';
+import { CliError } from '../dist/errors.js';
 
 const { version: expectedVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const storage = process.platform === 'win32' ? 'keyring' : 'file';
 const inheritedEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('MARINEVERSE_')));
 const originalFetch = globalThis.fetch;
 
-let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData;
+let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData, deviceStart, devicePolls, revokeStatuses;
 const race = { publicKey: 'race-key', name: 'Test Race', state: 'active', entries: [{ position: 1,
   boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }] };
 const feedbackPost = { uuid: 'post-uuid', slug: 'better-docking', board_slug: 'sailing', title: 'Better docking', description: 'More practice.\n\nIn strong wind.',
@@ -53,12 +54,18 @@ before(async () => {
       res.setHeader('Retry-After', '0');
       return send(count < 3 ? 503 : 200, { count });
     }
+    if (req.url === '/oauth/device_authorization' && deviceStart) return send(...deviceStart);
+    if (req.url === '/oauth/token' && new URLSearchParams(body).get('grant_type') === 'urn:ietf:params:oauth:grant-type:device_code' && devicePolls.length) {
+      const [status, value, headers = {}] = devicePolls.shift();
+      for (const [name, header] of Object.entries(headers)) res.setHeader(name, header);
+      return send(status, value);
+    }
     if (req.url === '/oauth/token') {
       const params = new URLSearchParams(body);
       if (params.get('grant_type') === 'refresh_token') refreshCount++;
       return send(200, { access_token: `access-${refreshCount}`, refresh_token: `refresh-${refreshCount}`, expires_in: 7200, scope: 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write' });
     }
-    if (req.url === '/oauth/revoke') return send(200, {});
+    if (req.url === '/oauth/revoke') return send(revokeStatuses.shift() ?? 200, {});
     if (req.url === '/api/v3/users/me') return send(200, { uuid: 'user-key', display_name: 'Test Sailor', country_code: 'NZ', time_zone: 'Pacific/Auckland', id: 42, email: 'private@example.test' });
     if (req.url === '/api/v3/sailing_progress') return send(200, sailingData);
     if (req.url.startsWith('/api/v3/feedback/')) {
@@ -101,6 +108,7 @@ before(async () => {
 });
 beforeEach(() => {
   requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, mainsail_hoist: 1, jib_hoist: 0.6, is_anchored: false, id: 999 }; refreshCount = 0; failRead = false; failure = undefined;
+  deviceStart = undefined; devicePolls = []; revokeStatuses = [];
   sailingData = { uuid: 'user-key', display_name: 'Test Sailor', id: 42, next_step: 'Try a race', finished_race: false,
     boat_stats: { yacht: { total_distance_nm: 12.34567, total_time_minutes: '90.12345', id: 99 }, dinghy: { total_distance_nm: 0, total_time_minutes: 0 } },
     tutorial: { yacht_tutorial_basics_started_at: '2026-01-01T12:00:00Z', yacht_tutorial_basics_finished_at: '2026-01-01T12:10:00Z',
@@ -295,6 +303,40 @@ test('top-level login uses the same options and implementation as auth login', a
     assert.equal(captured.storage, 'file');
     assert.equal(typeof captured.announce, 'function');
     assert.equal(JSON.parse(output).data.logged_in, true);
+  }
+  assert.equal(requests.length, 0);
+});
+test('login chooser defaults to browser, method flags skip it, and scripts never wait on it', async () => {
+  const login = async (args, { interactive = true, choice = 'browser' } = {}) => {
+    const started = [];
+    let asked = false, stdout = '';
+    const code = await run(['node', 'marineverse', ...args], {
+      client: env => ({ environment: env, auth: {
+        login: async options => { started.push(['browser', options.browser]); return {}; },
+        deviceLogin: async options => { started.push(['device', options.browser]); return {}; } } }),
+      stdout: text => stdout += text, stderr: () => {}, isInteractive: () => interactive,
+      chooseLoginMethod: async () => { asked = true; return choice; },
+    });
+    return { code, started, asked, ...(args.includes('--json') ? { stdout } : {}) };
+  };
+  for (const path of [['login'], ['auth', 'login']]) {
+    assert.deepEqual(await login(path), { code: 0, started: [['browser', true]], asked: true });
+    assert.deepEqual((await login(path, { choice: 'device' })).started, [['device', true]]);
+    const cancelled = await login(path, { choice: null });
+    assert.equal(cancelled.code, 3);
+    assert.deepEqual(cancelled.started, []);
+    assert.deepEqual(await login([...path, '--browser']), { code: 0, started: [['browser', true]], asked: false });
+    assert.deepEqual(await login([...path, '--device-auth', '--no-browser']), { code: 0, started: [['device', false]], asked: false });
+    assert.deepEqual((await login([...path, '--no-browser'])).started, [['browser', false]]);
+    const conflict = await login([...path, '--browser', '--device-auth']);
+    assert.equal(conflict.code, 2);
+    assert.deepEqual(conflict.started, []);
+    const script = await login(path, { interactive: false });
+    assert.equal(script.asked, false);
+    assert.deepEqual(script.started, [['browser', true]]);
+    const json = await login([...path, '--json']);
+    assert.equal(json.asked, false);
+    assert.deepEqual(JSON.parse(json.stdout), { schema_version: 1, data: {}, meta: { environment: 'test' } });
   }
   assert.equal(requests.length, 0);
 });
@@ -700,6 +742,65 @@ test('browser login uses frontend consent with S256 then exchanges code and stor
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), authorized.searchParams.get('code_challenge'));
   assert.equal((await auth.credentials.read()).userUuid, 'user-key');
 });
+const deviceCode = 'secret-device-code-never-shown';
+const startDevice = (overrides = {}) => {
+  deviceStart = [200, { device_code: deviceCode, user_code: 'BCDF-GHJK', verification_uri: `${environment.webUrl}/oauth/device`,
+    verification_uri_complete: `${environment.webUrl}/oauth/device?user_code=BCDF-GHJK`, expires_in: 900, interval: 5, ...overrides }];
+};
+async function deviceLogin(auth = new Auth(environment)) {
+  const waits = [], shown = [];
+  try {
+    const result = await auth.deviceLogin({ browser: false, storage, sleep: async ms => { waits.push(ms); await new Promise(resolve => setTimeout(resolve, 2)); }, announce: (...args) => shown.push(args) });
+    return { result, waits, shown };
+  } catch (error) { return { error, waits, shown }; }
+}
+test('device login polls without a local listener, slows down when asked, and stores the approved identity', async () => {
+  startDevice();
+  devicePolls = [[400, { error: 'authorization_pending' }], [400, { error: 'slow_down' }], [400, { error: 'authorization_pending' }]];
+  const { result, waits, shown, error } = await deviceLogin();
+  assert.equal(error, undefined);
+  assert.equal(result.user_uuid, 'user-key');
+  assert.deepEqual(shown, [[`${environment.webUrl}/oauth/device`, 'BCDF-GHJK', 900]]);
+  assert.deepEqual(waits, [5000, 5000, 10000, 10000]);
+  const start = new URLSearchParams(requests.find(r => r.path === '/oauth/device_authorization').body);
+  assert.equal(start.get('client_id'), 'test-client');
+  assert.equal(start.get('scope'), 'public globe_read globe_write sailing_cv kb_read ai_ask feedback_read feedback_write clubs_read clubs_write');
+  const polls = requests.filter(r => r.path === '/oauth/token').map(r => new URLSearchParams(r.body));
+  assert.equal(polls.length, 4);
+  assert.ok(polls.every(p => p.get('grant_type') === 'urn:ietf:params:oauth:grant-type:device_code' && p.get('device_code') === deviceCode && p.get('client_id') === 'test-client'));
+  assert.equal(requests.some(r => r.path.includes('redirect_uri')), false);
+  assert.equal((await new Auth(environment).credentials.read()).userUuid, 'user-key');
+});
+test('device login reports denial, expiry, unsupported servers and foreign verification pages distinctly', async () => {
+  for (const [poll, code] of [[{ error: 'access_denied' }, 'AUTH_DENIED'], [{ error: 'expired_token' }, 'AUTH_EXPIRED'], [{ error: 'invalid_grant' }, 'DEVICE_AUTH_FAILED']]) {
+    startDevice(); devicePolls = [[400, poll]];
+    const { error } = await deviceLogin();
+    assert.equal(error.code, code);
+    assert.doesNotMatch(error.message, new RegExp(deviceCode));
+  }
+  startDevice({ expires_in: 0.001 });
+  assert.equal((await deviceLogin()).error.code, 'AUTH_EXPIRED');
+  requests = [];
+  deviceStart = undefined;
+  assert.equal((await deviceLogin()).error.code, 'DEVICE_AUTH_UNSUPPORTED');
+  assert.equal(requests.some(r => r.path === '/oauth/token'), false);
+  for (const overrides of [{ verification_uri: 'https://attacker.example/oauth/device' }, { verification_uri_complete: 'https://attacker.example/x' }, { user_code: '\u001b[31m' }, { device_code: '' }]) {
+    startDevice(overrides);
+    assert.equal((await deviceLogin()).error.code, 'INVALID_RESPONSE');
+  }
+});
+test('device login respects Retry-After and bounds transport backoff', async () => {
+  startDevice();
+  devicePolls = [[429, { error: 'Too many requests' }, { 'Retry-After': '30' }], [503, {}]];
+  const limited = await deviceLogin();
+  assert.equal(limited.error, undefined);
+  assert.deepEqual(limited.waits, [5000, 30000, 10000]);
+  startDevice();
+  devicePolls = Array.from({ length: 6 }, () => [503, {}]);
+  const failing = await deviceLogin();
+  assert.equal(failing.error.code, 'API_ERROR');
+  assert.deepEqual(failing.waits, [5000, 10000, 20000, 40000, 60000, 60000]);
+});
 test('callback page is branded and self-contained without external assets or scripts', async () => {
   const page = callbackPage('received');
   assert.match(page, /MarineVerse CLI/);
@@ -743,4 +844,126 @@ test('offline logout explicitly reports unconfirmed revocation while clearing lo
   const auth = await signedIn(); failure = 503;
   assert.equal((await auth.logout()).server_revocation_confirmed, false);
   assert.equal(await auth.credentials.read(), undefined);
+});
+const posixUser = process.platform !== 'win32' && process.getuid?.() !== 0;
+test('credential storage failures are typed and malformed local data can be cleared', { skip: !posixUser }, async () => {
+  const auth = await signedIn();
+  const { directory } = auth.credentials;
+  await chmod(join(directory, 'tokens.json'), 0o000);
+  assert.equal((await cli('auth', 'status', '--json')).json().error.code, 'CREDENTIAL_FILE_UNREADABLE');
+  await chmod(join(directory, 'tokens.json'), 0o600);
+  await writeFile(join(directory, 'tokens.json'), 'not json');
+  assert.equal((await cli('auth', 'status', '--json')).json().error.code, 'CREDENTIAL_INVALID');
+  await writeFile(join(directory, 'account.json'), '{');
+  const malformed = await cli('auth', 'status', '--local', '--json');
+  assert.equal(malformed.code, 3);
+  assert.equal(malformed.json().error.code, 'CREDENTIAL_METADATA_INVALID');
+  assert.equal((await cli('auth', 'logout', '--json')).json().data.server_revocation_confirmed, false);
+  assert.equal((await cli('auth', 'status', '--local', '--json')).json().error.code, 'AUTH_REQUIRED');
+  assert.equal(requests.length, 0);
+});
+test('login checks credential storage before contacting MarineVerse', { skip: !posixUser }, async () => {
+  const saved = process.env.MARINEVERSE_CONFIG_DIR;
+  const readOnly = await mkdtemp(join(tmpdir(), 'marineverse-cli-readonly-'));
+  await chmod(readOnly, 0o500);
+  process.env.MARINEVERSE_CONFIG_DIR = readOnly;
+  try {
+    const auth = new Auth(environment);
+    await assert.rejects(auth.login({ browser: false, storage, announce: assert.fail }), { code: 'CREDENTIAL_DIRECTORY_UNWRITABLE' });
+    await assert.rejects(auth.deviceLogin({ browser: false, storage, announce: assert.fail }), { code: 'CREDENTIAL_DIRECTORY_UNWRITABLE' });
+  } finally {
+    process.env.MARINEVERSE_CONFIG_DIR = saved;
+    await chmod(readOnly, 0o700);
+    await rm(readOnly, { recursive: true, force: true });
+  }
+  assert.equal(requests.length, 0);
+});
+test('tokens that cannot be saved are revoked and the previous session is kept', { skip: !posixUser }, async () => {
+  const auth = await signedIn();
+  const previous = await auth.credentials.read();
+  const { directory } = auth.credentials;
+  startDevice();
+  // Storage breaks after the preflight check, while the CLI waits for approval.
+  const error = await auth.deviceLogin({ browser: false, storage, announce() {}, sleep: () => chmod(directory, 0o500) }).then(() => undefined, failure => failure);
+  await chmod(directory, 0o700);
+  assert.equal(error.code, 'AUTH_CREDENTIAL_SAVE_FAILED');
+  assert.match(error.message, /AUTH_LOCK_FAILED/);
+  assert.deepEqual(requests.filter(r => r.path === '/oauth/revoke').map(r => new URLSearchParams(r.body).get('token')), ['refresh-0', 'access-0']);
+  assert.deepEqual(await auth.credentials.read(), previous);
+});
+test('switching to file storage preserves the new login when old keyring cleanup fails', { skip: process.platform === 'win32' }, async () => {
+  for (const failurePoint of ['entry', 'delete']) {
+    const auth = await signedIn();
+    await writeFile(join(auth.credentials.directory, 'account.json'), JSON.stringify({ userUuid: 'user-key', storage: 'keyring' }));
+    // Simulate an unavailable native keyring without accessing the real OS store.
+    auth.credentials.entry = async () => {
+      if (failurePoint === 'entry') throw new CliError('CREDENTIAL_STORE_UNAVAILABLE', 'Fixture unavailable keyring');
+      return { deletePassword: async () => { throw new Error('Fixture cleanup failure'); } };
+    };
+    startDevice();
+    const { result, error } = await deviceLogin(auth);
+    assert.equal(error, undefined);
+    assert.equal(result.user_uuid, 'user-key');
+    assert.equal((await auth.credentials.read()).accessToken, 'access-0');
+    assert.equal((await auth.status()).user_uuid, 'user-key');
+    assert.equal(requests.some(request => request.path === '/oauth/revoke'), false);
+  }
+});
+test('failed credential saves report revocation only when both token revocations succeed', async () => {
+  for (const statuses of [[200, 200], [503, 503], [200, 503], [503, 200]]) {
+    const auth = await signedIn();
+    const previous = await auth.credentials.read();
+    auth.credentials.write = async () => { throw new CliError('AUTH_CREDENTIAL_SAVE_FAILED', 'Fixture storage failure'); };
+    startDevice();
+    devicePolls = [[200, { access_token: 'unsaved-access', refresh_token: 'unsaved-refresh', expires_in: 7200, scope: 'public' }]];
+    revokeStatuses = [...statuses];
+    requests = [];
+    const { error } = await deviceLogin(auth);
+    assert.equal(error.code, 'AUTH_CREDENTIAL_SAVE_FAILED');
+    if (statuses.every(status => status === 200)) assert.match(error.message, /The new tokens were revoked\./);
+    else {
+      assert.match(error.message, /revocation could not be confirmed; the new tokens may still be valid/);
+      assert.doesNotMatch(error.message, /tokens were revoked/);
+    }
+    assert.deepEqual(requests.filter(request => request.path === '/oauth/revoke').map(request => new URLSearchParams(request.body).get('token')),
+      ['unsaved-refresh', 'unsaved-access']);
+    assert.deepEqual(await auth.credentials.read(), previous);
+  }
+});
+test('auth status --local reads stored metadata without network access or refresh', async () => {
+  await signedIn(true);
+  const result = await cli('auth', 'status', '--local', '--json');
+  assert.equal(result.code, 0);
+  assert.equal(result.json().data.user_uuid, 'user-key');
+  assert.equal(result.json().data.access_token_expired, true);
+  assert.equal(requests.length, 0);
+});
+test('a browser login timeout offers device login only interactively and after asking', async () => {
+  const attempt = async ({ interactive = true, agree = true, code = 'AUTH_TIMEOUT' } = {}) => {
+    const started = [];
+    let asked = false;
+    const exit = await run(['node', 'marineverse', 'login', '--browser'], {
+      client: env => ({ environment: env, auth: {
+        login: async () => { started.push('browser'); throw new CliError(code, 'Login did not finish.', 3); },
+        deviceLogin: async () => { started.push('device'); return {}; } } }),
+      stdout: () => {}, stderr: () => {}, isInteractive: () => interactive,
+      confirmDeviceLogin: async () => { asked = true; return agree; },
+    });
+    return { exit, started, asked };
+  };
+  assert.deepEqual(await attempt(), { exit: 0, started: ['browser', 'device'], asked: true });
+  assert.deepEqual(await attempt({ agree: false }), { exit: 3, started: ['browser'], asked: true });
+  assert.deepEqual(await attempt({ interactive: false }), { exit: 3, started: ['browser'], asked: false });
+  assert.deepEqual(await attempt({ code: 'AUTH_DENIED' }), { exit: 3, started: ['browser'], asked: false });
+});
+test('unexpected filesystem errors report only errno and system call', async () => {
+  let stdout = '';
+  await run(['node', 'marineverse', 'auth', 'logout', '--json'], {
+    client: env => ({ environment: env, auth: { logout: async () => { throw Object.assign(new Error('open /private/secret'), { code: 'EACCES', syscall: 'open' }); } } }),
+    stdout: text => stdout += text, stderr: () => {},
+  });
+  const { error } = JSON.parse(stdout);
+  assert.equal(error.code, 'FILESYSTEM_ERROR');
+  assert.match(error.message, /EACCES during open/);
+  assert.doesNotMatch(error.message, /secret/);
 });

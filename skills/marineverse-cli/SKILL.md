@@ -14,7 +14,7 @@ Check `marineverse --version` before installing another copy. For installation a
 
 Install the whole skill directory, linked references and repository license notices. After bootstrap, prefer `marineverse skills install --agent codex` (or `claude`). Preserve customized and unmanaged files. Personal scope is the default; use project scope only when requested.
 
-Production is the default. Preserve saved environments and credentials. Public discovery needs no login. Private reads and controls use normal `marineverse login`, which handles all supported permissions. Reconnect older sessions through normal login. Never request passwords or expose tokens.
+Production is the default. Preserve saved environments and credentials. Public discovery needs no login. Private reads and controls use normal `marineverse login`, which handles all supported permissions. Agents pass a method: `--browser` when the user's browser is on the CLI's machine, or `--device-auth --no-browser` when the CLI runs remotely or headless, relaying the printed URL and code (see [setup](references/setup.md)). Reconnect older sessions through normal login. Never request passwords or expose tokens.
 
 ## Workflow references
 

@@ -43,7 +43,8 @@ export async function request(url: string, options: RequestInit = {}, timeoutMs 
       const [code, exit] = codes[response.status] || ['API_ERROR', 7];
       const detail = Array.isArray(body?.errors) ? body.errors.join('; ') : body?.error_description || body?.error;
       const message = typeof detail === 'string' ? detail : `API returned HTTP ${response.status}.`;
-      throw new CliError(code, `${message}${retryAfter !== undefined ? ` Retry after ${retryAfter} seconds.` : ''}`, exit, retryAfter);
+      throw new CliError(code, `${message}${retryAfter !== undefined ? ` Retry after ${retryAfter} seconds.` : ''}`, exit, retryAfter,
+        typeof body?.error === 'string' ? body.error : undefined);
     }
     return body;
   }
