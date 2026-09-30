@@ -23,7 +23,25 @@ export interface Services {
 }
 const defaults: Services = { client: environment => new MarineVerseClient(environment), stdout: message => process.stdout.write(message), stderr: message => process.stderr.write(message) };
 
-export function registerPublicCommands(program: Command, services: Services = defaults): void {
+export function createServices(overrides: Partial<Services> = {}): Services {
+  return { ...defaults, ...overrides };
+}
+
+export interface ApplicationOptions {
+  name?: string;
+  version?: string;
+  description?: string;
+  registerMaintenance?: (program: Command, services: Services) => void;
+  extend?: (program: Command, services: Services) => void;
+}
+
+export function registerPublicCommands(program: Command, services: Services = defaults, application: ApplicationOptions = {}): void {
+  if (application.registerMaintenance) application.registerMaintenance(program, services);
+  else registerMaintenanceCommands(program, services);
+  registerFeatureCommands(program, services);
+}
+
+function registerMaintenanceCommands(program: Command, services: Services): void {
   program.command('upgrade').description('Upgrade this installation using npm or Homebrew')
     .action(async (_opts, command) => {
       const result = await (services.upgrade || upgrade)(services.stderr);
@@ -38,6 +56,9 @@ export function registerPublicCommands(program: Command, services: Services = de
         ? `${JSON.stringify({ schema_version: 1, data: result, meta: {} })}\n`
         : `${versionMessage(result)}\n`);
     });
+}
+
+function registerFeatureCommands(program: Command, services: Services): void {
   const tableCommands = new Map<Command, TableKind>();
   const tableCommand = (command: Command, kind: TableKind) => {
     tableCommands.set(command, kind);
@@ -140,7 +161,7 @@ export function registerPublicCommands(program: Command, services: Services = de
         if (method === 'device') return deviceLogin(client);
         try {
           return await client.auth.login({ browser, storage: opts.storage,
-            announce: url => services.stderr(`Open this MarineVerse page to authorize the CLI:\n${url}\nIf the browser cannot reach this computer, run marineverse login --device-auth instead.\n`) });
+            announce: url => services.stderr(`Open this MarineVerse page to authorize the CLI:\n${url}\nIf the browser cannot reach this computer, run ${program.name()} login --device-auth instead.\n`) });
         } catch (error) {
           // login() has closed its listener by now, so only one grant is ever active; never switch without asking.
           if (!(error instanceof CliError) || error.code !== 'AUTH_TIMEOUT' || !interactive || !await (services.confirmDeviceLogin || confirmDeviceLogin)()) throw error;
@@ -338,18 +359,19 @@ export function registerPublicCommands(program: Command, services: Services = de
   }
 }
 
-export function createProgram(services: Services = defaults): Command {
-  const program = new Command().name('marineverse').description('MarineVerse races, boats, profile, sailing progress, and statistics')
-    .version(VERSION).option('--env <name>', 'Configured environment').option('--api-url <origin>', 'Override API origin (does not reuse credentials across origins)')
+export function createProgram(services: Services = defaults, application: ApplicationOptions = {}): Command {
+  const program = new Command().name(application.name || 'marineverse').description(application.description || 'MarineVerse races, boats, profile, sailing progress, and statistics')
+    .version(application.version || VERSION).option('--env <name>', 'Configured environment').option('--api-url <origin>', 'Override API origin (does not reuse credentials across origins)')
     .option('--json', 'Print a versioned JSON result').option('--no-color', 'Disable color (output is plain by default)')
     .showHelpAfterError().exitOverride().configureOutput({ writeOut: services.stdout, writeErr: () => {} });
-  registerPublicCommands(program, services);
+  registerPublicCommands(program, services, application);
+  application.extend?.(program, services);
   return program;
 }
 
-export async function run(argv: string[], services: Services = defaults): Promise<number> {
+export async function run(argv: string[], services: Services = defaults, application: ApplicationOptions = {}): Promise<number> {
   try {
-    const program = createProgram(services);
+    const program = createProgram(services, application);
     if (argv.length <= 2) { program.outputHelp(); return 0; }
     await program.parseAsync(argv);
     return 0;
@@ -362,8 +384,9 @@ export async function run(argv: string[], services: Services = defaults): Promis
       : errno(error) !== 'unknown error'
         ? new CliError('FILESYSTEM_ERROR', `A local file operation failed (${errno(error)}${typeof syscall === 'string' && /^[a-z]+$/.test(syscall) ? ` during ${syscall}` : ''}). Check permissions under ${configDir()}.`, 2)
         : new CliError('INTERNAL_ERROR', 'Operation failed. Check your configuration and credential store.');
-    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message: failure.message, retry_after_seconds: failure.retryAfterSeconds } })}\n`);
-    else services.stderr(`${failure.code}: ${safe(failure.message)}\n`);
+    const message = application.name ? failure.message.replace(/\bmarineverse (?=login\b|auth\b)/g, `${application.name} `) : failure.message;
+    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message, retry_after_seconds: failure.retryAfterSeconds } })}\n`);
+    else services.stderr(`${failure.code}: ${safe(message)}\n`);
     return failure.exitCode;
   }
 }
