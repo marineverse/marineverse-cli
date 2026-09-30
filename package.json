@@ -1,6 +1,6 @@
 {
   "name": "@marineverse/cli",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "MarineVerse races, boats, and account access from your terminal",
   "type": "module",
   "license": "Apache-2.0",
