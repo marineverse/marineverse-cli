@@ -287,8 +287,17 @@ export function registerPublicCommands(program: Command, services: Services = de
   browserCommand(boats, 'open <boat-uuid>', 'Open a public boat profile on the website', key => `/globe/boats-profiles/${key}`);
   browserCommand(boats, 'view-3d <boat-uuid>', 'Open the boat’s 3D view on the website', key => `/globe/boats-profiles/${key}/3d`);
   tableCommand(boats.command('profile <boat-uuid>'), 'boats').description('View a public boat profile without login').action((uuid, opts, command) => invoke(command, client => client.profile(uuid)));
-  tableCommand(boats.command('list'), 'boats').requiredOption('--mine', 'List boats you own or crew').action(execute(client => client.boats()));
+  // Weather is fetched only when a weather column is requested.
+  tableCommand(boats.command('list'), 'boats').requiredOption('--mine', 'List boats you own or crew')
+    .action((opts, command) => invoke(command, client => client.boats(
+      String(opts.columns ?? '').split(',').some(column => ['wind', 'wind-dir', 'current', 'wave'].includes(column.trim())))));
   tableCommand(boats.command('show <boat-uuid>'), 'boats').description('Read one of your owned/crewed boats').action((uuid, opts, command) => invoke(command, client => client.showBoat(uuid)));
+  boats.command('history <boat-uuid>').description('Recorded logs, port calls, or passages of your boat, newest first (one type per request)')
+    .addOption(new Option('--type <type>', 'History to read').choices(['logs', 'port-calls', 'passages']).default('logs'))
+    .option('--limit <count>', 'Maximum records, 1–200', '50')
+    .option('--since <time>', 'Only records at or after this ISO 8601 time, such as 2026-09-30T00:00:00Z')
+    .option('--cursor <cursor>', 'Continue from next_cursor of the previous page')
+    .action((uuid, opts, command) => invoke(command, client => client.boatHistory(uuid, { ...opts, limit: Number(opts.limit) })));
   tableCommand(boats.command('set-heading <boat-uuid>'), 'boats').requiredOption('--degrees <number>', 'Heading from 0 through 360 (360 becomes 0)')
     .action((uuid, opts, command) => {
       const heading = Number(opts.degrees);

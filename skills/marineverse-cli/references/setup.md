@@ -29,6 +29,7 @@ The skill does not itself install a runtime or executable just by being loaded. 
   - `marineverse login --browser` when the user's browser runs on the same machine as the CLI. The browser must reach `127.0.0.1` on that machine; `--no-browser` only prints the URL instead of opening it.
   - `marineverse login --device-auth --no-browser` when the CLI runs remotely or the browser cannot reach it. Relay the printed URL and short code exactly as shown on stderr; the user opens it on any device, checks the code, and approves. Keep the command running until it exits. Codes expire after 15 minutes.
 - Never retry login in a loop or start a second login while one is waiting. Report login or storage errors to the user; do not switch storage modes without their approval.
+- Headless and cloud Linux sessions usually lack a Secret Service, so default keyring login fails with `CREDENTIAL_STORE_UNAVAILABLE` before consent. Explain this and, only with the user's approval, use `--storage file` (private 0600 files). `CREDENTIAL_MISSING` means saved login details exist but the tokens are gone; run login again.
 - Use `marineverse auth status --local --json` to inspect a stored session without network access; plain `auth status` verifies it with MarineVerse.
 
 ## Version checks and upgrades

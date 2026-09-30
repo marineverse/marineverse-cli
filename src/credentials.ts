@@ -64,10 +64,12 @@ export class Credentials {
     return account;
   }
 
+  // On Linux the library otherwise falls back silently from Secret Service to the kernel keyring,
+  // which is session-bound, so a login would appear to succeed and then vanish. Require Secret Service.
   private async entry(userUuid: string) {
     try {
       const { AsyncEntry } = await import('@napi-rs/keyring');
-      return new AsyncEntry('MarineVerse CLI', `${this.key}:${userUuid}`);
+      return new AsyncEntry('MarineVerse CLI', `${this.key}:${userUuid}`, { linux: { store: 'secret-service' } });
     } catch { throw keyringError(); }
   }
 
@@ -78,14 +80,16 @@ export class Credentials {
     if (account.storage === 'file') {
       try { value = await readFile(join(this.directory, 'tokens.json'), 'utf8'); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-        throw new CliError('CREDENTIAL_FILE_UNREADABLE', `Cannot read the credential file (${errno(error)}). Check permissions under ${configDir()}.`, 2);
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CliError('CREDENTIAL_FILE_UNREADABLE', `Cannot read the credential file (${errno(error)}). Check permissions under ${configDir()}.`, 2);
       }
     } else {
       const entry = await this.entry(account.userUuid);
       try { value = await entry.getPassword(); } catch { throw keyringError(); }
     }
-    if (!value) return undefined;
+    if (!value) {
+      throw new CliError('CREDENTIAL_MISSING', `This environment has saved login details, but its tokens are missing from the ${account.storage === 'file' ? 'credential file' : 'OS credential store'}. `
+        + 'They may have been removed or kept only for an earlier session. Run marineverse login again.', 3);
+    }
     let credential;
     try { credential = JSON.parse(value); } catch { /* reported below */ }
     if (credential?.userUuid !== account.userUuid || typeof credential.accessToken !== 'string' || typeof credential.refreshToken !== 'string' || !Number.isFinite(credential.expiresAt)) {
@@ -126,9 +130,13 @@ export class Credentials {
     if (selected !== 'file') await unlink(tokensPath).catch(() => {});
   }
 
-  async remove(): Promise<void> {
+  // With keepUnavailableSecret, an unreachable OS store does not block clearing the local metadata.
+  async remove(keepUnavailableSecret = false): Promise<void> {
     const account = await this.account().catch(error => { if (error.code === 'CREDENTIAL_METADATA_INVALID') return undefined; throw error; });
-    if (account?.storage === 'keyring') await (await this.entry(account.userUuid)).deletePassword();
+    if (account?.storage === 'keyring') {
+      try { await (await this.entry(account.userUuid)).deletePassword(); }
+      catch (error) { if (!keepUnavailableSecret) throw error; }
+    }
     for (const name of ['tokens.json', 'account.json']) {
       await unlink(join(this.directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error; });
     }
@@ -136,5 +144,6 @@ export class Credentials {
 }
 
 function keyringError() {
-  return new CliError('CREDENTIAL_STORE_UNAVAILABLE', 'The OS credential store is unavailable or locked. Unlock it, or on Unix explicitly use auth login --storage file.');
+  return new CliError('CREDENTIAL_STORE_UNAVAILABLE', 'The OS credential store is unavailable or locked. Unlock it; on Linux, keyring storage requires a Secret Service '
+    + '(such as GNOME Keyring or KWallet), which headless and cloud sessions usually lack. Otherwise explicitly use auth login --storage file on Unix.');
 }

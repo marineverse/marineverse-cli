@@ -270,15 +270,15 @@ export class Auth {
 
   async logout() {
     return this.credentials.lock(async () => {
-      // Malformed local data cannot be revoked, but logout must still be able to clear it.
-      let malformed = false;
+      // Malformed, missing or unreachable tokens cannot be revoked, but logout must still be able to clear local data.
+      let unreadable = false;
       const credential = await this.credentials.read().catch(error => {
-        if (!(error instanceof CliError) || !['CREDENTIAL_METADATA_INVALID', 'CREDENTIAL_INVALID'].includes(error.code)) throw error;
-        malformed = true;
+        if (!(error instanceof CliError) || !['CREDENTIAL_METADATA_INVALID', 'CREDENTIAL_INVALID', 'CREDENTIAL_MISSING', 'CREDENTIAL_STORE_UNAVAILABLE'].includes(error.code)) throw error;
+        unreadable = true;
         return undefined;
       });
-      const revoked = credential ? await this.revoke(credential) : !malformed;
-      await this.credentials.remove();
+      const revoked = credential ? await this.revoke(credential) : !unreadable;
+      await this.credentials.remove(unreadable);
       return { logged_out: true, server_revocation_confirmed: revoked };
     });
   }

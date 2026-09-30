@@ -244,6 +244,8 @@ node ./bin/marineverse.js --env local globe boats profile BOAT_UUID
 
 Copy race keys and boat UUIDs from command output. The race list includes registration-open, active, and the latest ten finished races. Private boat profiles retain their normal access restrictions.
 
+`races show --json` also includes the race `origin`, `destination` (name and position), and `course` (the ordered waypoints, gates, and marks; `features` is empty for a direct race). Each leaderboard entry in `show` and `leaderboard` JSON includes `nextFeature` (id, kind, name, sequence) alongside `nextFeatureDistanceNm`; both are `null` when there is no next feature.
+
 Boat profiles, lists, details, update results, and leaderboards include latitude/longitude columns by default in signed decimal degrees (five decimal places). JSON boat objects expose `latitude` and `longitude` at the API's full precision, including when the public API uses `p_lat`/`p_lng`. Missing coordinates display as `—` (`null` in JSON), never a guessed position.
 
 Choose table columns and their order with `--columns`. Each table command's `--help` lists its available fields. Without this flag, the default columns are shown. JSON always retains the complete result.
@@ -254,6 +256,39 @@ node ./bin/marineverse.js globe boats list --mine --columns name,heading,speed,l
 node ./bin/marineverse.js globe races list --columns key,name,state
 node ./bin/marineverse.js globe races leaderboard RACE_PUBLIC_KEY --columns position,name,distance
 ```
+
+`globe boats show BOAT_UUID` returns the current state and weather in one request. JSON adds the boat's `awa` (apparent wind angle, °), `time_since_last_update_seconds` (how long since the simulation last updated the boat), `in_port`, and `crew_role`, plus:
+
+- `weather`: the forecast at the boat's position as time-aligned arrays of up to six hourly samples starting at the current UTC hour (`time`, `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `wave_height`, `wave_direction`, `ocean_current_velocity`, `ocean_current_direction`, `visibility`, `weather_code`), or `null` when no forecast is available. Marine fields are `null` where no marine forecast exists.
+- `weather_now`: the value interpolated to the current minute, as the simulation does (`wind_speed_kn`, `wind_direction_deg`, `wind_gusts_kn`, `wave_height_m`, `wave_direction_deg`, `current_speed_kn`, `current_direction_deg`). It is a forecast estimate, not a sensor reading, and is `null` when the available forecast does not start at the current hour, for example an older fallback forecast.
+- `weather_units`: wind, gusts, and current in knots; waves in metres; directions in degrees; visibility in metres.
+- `last_port_call`: the most recent arrival or departure (`port`, `event_type`, `event_timestamp`), or `null`.
+
+It does not load logs, tracks, statistics, passages, crew, or races. Optional table columns `wind`, `wind-dir`, `current`, `wave` (from `weather_now`), `update-age`, and `in-port` appear only when requested:
+
+```sh
+marineverse globe boats show BOAT_UUID --columns name,heading,speed,main,jib,wind,wind-dir,current,wave,update-age,in-port
+marineverse globe boats list --mine --columns name,heading,speed,wind,update-age
+```
+
+`globe boats profile BOAT_UUID --json` (public, no login) keeps these sections of the public profile: `boat`, `weather` (forecast arrays), `last_port_call`, `boat_stats` (overall distance and yearly, monthly, and daily distance history in nm), `passages` (the latest 20, with start and end ports, times, duration, and rhumb-line distance), `seas_visited`, and `races`. Tracking logs, track geometry, crew members, and owner-only data are not included.
+
+Read what happened to one of your boats with `globe boats history`. Each request reads one type, newest first, as a separate bounded page:
+
+```sh
+marineverse globe boats history BOAT_UUID --type logs --since 2026-09-30T00:00:00Z --limit 100 --json
+marineverse globe boats history BOAT_UUID --type port-calls --limit 50
+marineverse globe boats history BOAT_UUID --type passages --limit 20
+marineverse globe boats history BOAT_UUID --type passages --cursor NEXT_CURSOR
+```
+
+- `logs` (default): simulation tracking entries with UTC `timestamp`, `latitude`/`longitude`, `heading`, `last_speed_in_kts`, `sog`, `wind_speed`, `current_speed` (knots), `awa`, `offline`, and `event` for breaks such as a teleport. The server keeps only about the last day of logs; `oldest_available_at` shows the oldest retained entry. Earlier logs are no longer available.
+- `port-calls`: arrivals and departures (`port`, `event_type`, `event_timestamp`).
+- `passages`: completed port-to-port passages (start and end ports, `departedAt`, `arrivedAt`, `durationSeconds`, `rhumbDistanceNm`), ordered by when they were recorded on arrival.
+
+`--limit` is 1–200 (default 50). `--since` keeps records at or after an ISO 8601 time. When more records exist, the result has `next_cursor` (and the table prints the `--cursor` to use); pass it with the same `--type` to read the next page without repeats or gaps. An empty history is an empty `items` list; if the log store is unavailable, the command fails with a server error instead of returning an empty list. Recorded values are never filled in from the boat's current state.
+
+`boats list --mine` includes `time_since_last_update_seconds` for every boat. It fetches weather only when you select a weather column (`wind`, `wind-dir`, `current`, or `wave`); each boat then gets `weather_now`, and the result includes `weather_units`, all from one bounded request. This also applies with `--json`, although `--columns` still does not filter JSON fields.
 
 Open resources in your default browser using the selected environment's website URL (`http://localhost:3005` for local, `https://www.marineverse.com` for production by default):
 
@@ -321,7 +356,7 @@ node ./bin/marineverse.js config use local
 
 Settings live in `~/.config/marineverse/config.json` on macOS/Linux (`$XDG_CONFIG_HOME` is honored), or `%APPDATA%\MarineVerse\config.json` on Windows. `MARINEVERSE_CONFIG_DIR` overrides the directory for isolated testing. Settings contain environment URLs and public OAuth client IDs, not tokens.
 
-Tokens default to the OS credential store: macOS Keychain, Windows Credential Manager, or an available Linux credential service. If unavailable, login reports the failure. Unix users may explicitly choose `auth login --storage file`; tokens then live in private files under the configuration directory (0700 directory, 0600 files). Windows uses the credential store, not file mode. Account metadata identifies which store and user are active. Credentials are isolated by configuration directory, environment, API origin, client ID, and account.
+Tokens default to the OS credential store: macOS Keychain, Windows Credential Manager, or a Linux Secret Service (such as GNOME Keyring or KWallet). On Linux the CLI requires a Secret Service and never falls back to the session-only kernel keyring, because a login stored there disappears when the session ends. Headless and cloud Linux sessions usually have no Secret Service, so login fails before you approve anything with `CREDENTIAL_STORE_UNAVAILABLE`; use `--storage file` there. If saved login details exist but their tokens are gone, commands report `CREDENTIAL_MISSING`; run `marineverse login` again (`auth logout` also clears it). Unix users may explicitly choose `auth login --storage file`; tokens then live in private files under the configuration directory (0700 directory, 0600 files). Windows uses the credential store, not file mode. Account metadata identifies which store and user are active. Credentials are isolated by configuration directory, environment, API origin, client ID, and account.
 
 `auth status` verifies the session with the API, which may refresh and save tokens. `auth status --local` only reads the stored identity, scopes, and expiry: no network access, refresh, or writes.
 

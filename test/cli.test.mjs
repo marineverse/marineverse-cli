@@ -19,7 +19,7 @@ const storage = process.platform === 'win32' ? 'keyring' : 'file';
 const inheritedEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('MARINEVERSE_')));
 const originalFetch = globalThis.fetch;
 
-let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData, deviceStart, devicePolls, revokeStatuses;
+let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData, deviceStart, devicePolls, revokeStatuses, boatSnapshot;
 const race = { publicKey: 'race-key', name: 'Test Race', state: 'active', entries: [{ position: 1,
   boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }] };
 const feedbackPost = { uuid: 'post-uuid', slug: 'better-docking', board_slug: 'sailing', title: 'Better docking', description: 'More practice.\n\nIn strong wind.',
@@ -89,8 +89,13 @@ before(async () => {
     if (req.url === '/api/v3/ai/ask') return send(200, { answer: 'Ease the sheet.\nThen reef.', interaction_uuid: '00000000-0000-4000-8000-000000000002', tokens: { consumed: 20, remaining: 73 }, user_id: 99 });
     if (req.url === '/api/v2/globe/races') return send(200, { registration_open_races: [], active_races: [race], finished_races: [] });
     if (req.url === '/api/v2/globe/races/race-key') return send(200, { race });
-    if (req.url === '/api/v2/globe/boats/boat-key/profile') return send(200, { boat: currentBoat, races: { active: [race], past: [] } });
+    if (req.url === '/api/v2/globe/boats/boat-key/profile') return send(200, { boat: currentBoat, races: { active: [race], past: [] }, ...boatSnapshot });
     if (req.url === '/api/v3/globe_boats') return send(200, { boats: [currentBoat] });
+    if (req.url.startsWith('/api/v3/globe_boats/boat-key/history?')) {
+      const query = new URL(req.url, 'http://localhost').searchParams;
+      return send(200, { uuid: 'boat-key', type: query.get('type'), ...boatSnapshot.history?.[query.get('cursor') ?? 'first'] });
+    }
+    if (req.url === '/api/v3/globe_boats?include=weather') return send(200, { boats: [{ ...currentBoat, weather_now: boatSnapshot.weather_now ?? null }], weather_units: { wind_speed_10m: 'kn' } });
     if (req.url === '/api/v3/globe_boats/boat-key') {
       if (req.method === 'PATCH') {
         Object.assign(currentBoat, JSON.parse(body).boat);
@@ -98,7 +103,7 @@ before(async () => {
         return send(200, { boat: currentBoat });
       }
       if (failRead) return send(503, { error: 'Readback unavailable' });
-      return send(200, { boat: currentBoat });
+      return send(200, { boat: currentBoat, ...boatSnapshot });
     }
     send(404, { error: 'Not found' });
   });
@@ -108,7 +113,7 @@ before(async () => {
 });
 beforeEach(() => {
   requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, mainsail_hoist: 1, jib_hoist: 0.6, is_anchored: false, id: 999 }; refreshCount = 0; failRead = false; failure = undefined;
-  deviceStart = undefined; devicePolls = []; revokeStatuses = [];
+  deviceStart = undefined; devicePolls = []; revokeStatuses = []; boatSnapshot = {};
   sailingData = { uuid: 'user-key', display_name: 'Test Sailor', id: 42, next_step: 'Try a race', finished_race: false,
     boat_stats: { yacht: { total_distance_nm: 12.34567, total_time_minutes: '90.12345', id: 99 }, dinghy: { total_distance_nm: 0, total_time_minutes: 0 } },
     tutorial: { yacht_tutorial_basics_started_at: '2026-01-01T12:00:00Z', yacht_tutorial_basics_finished_at: '2026-01-01T12:10:00Z',
@@ -551,6 +556,28 @@ test('leaderboard preserves server rank and penalty', async () => {
   assert.equal(result.data.entries[0].position, 1);
   assert.equal(result.data.entries[0].penaltySeconds, 30);
 });
+test('race JSON keeps origin, destination, course and each entry next feature', async () => {
+  const plain = (await cli('--json', 'globe', 'races', 'show', 'race-key')).json().data;
+  assert.deepEqual([plain.origin, plain.destination, plain.course, plain.entries[0].nextFeature], [null, null, null, null]);
+  const gate = { id: 'gate-1', kind: 'gate', sequence: 1, a: { lat: -36.8, lng: 174.7 }, b: { lat: -36.81, lng: 174.71 }, direction: 'a_to_b' };
+  Object.assign(race, { origin: { lat: -36.84, lng: 174.76 }, destination: { name: 'Russell', lat: -35.26, lng: 174.12 },
+    course: { version: 1, strict_order: true, waypoint_radius_nm_default: 4, features: [gate] } });
+  Object.assign(race.entries[0], { nextFeature: { id: 'gate-1', kind: 'gate', name: 'Start gate', sequence: 1 }, nextFeatureDistanceNm: 2.5 });
+  try {
+    const shown = (await cli('--json', 'globe', 'races', 'show', 'race-key')).json().data;
+    assert.deepEqual(shown.origin, race.origin);
+    assert.deepEqual(shown.destination, race.destination);
+    assert.deepEqual(shown.course, race.course);
+    assert.deepEqual(shown.entries[0].nextFeature, race.entries[0].nextFeature);
+    assert.equal(shown.entries[0].nextFeatureDistanceNm, 2.5);
+    const leaderboard = (await cli('--json', 'globe', 'races', 'leaderboard', 'race-key')).json().data;
+    assert.deepEqual(leaderboard.entries[0].nextFeature, race.entries[0].nextFeature);
+    assert.match((await cli('globe', 'races', 'show', 'race-key')).stdout, /Test Race \(race-key\)/);
+  } finally {
+    for (const key of ['origin', 'destination', 'course']) delete race[key];
+    delete race.entries[0].nextFeature; delete race.entries[0].nextFeatureDistanceNm;
+  }
+});
 test('boat coordinates are preserved and displayed across public and authenticated results', async () => {
   Object.assign(currentBoat, { p_lat: -37.867123456, p_lng: 0 });
   const profile = await cli('--json', 'globe', 'boats', 'profile', 'boat-key');
@@ -589,6 +616,99 @@ test('table columns are selectable in order while JSON keeps its full result', a
   const board = await cli('globe', 'races', 'leaderboard', 'race-key', '--columns', 'name,position');
   assert.match(board.stdout, /BOAT\s+POS\nBoat\s+1/);
   assert.match((await cli('globe', 'boats', 'profile', '--help')).stdout, /--columns/);
+});
+test('boats show returns state, weather and the last port call in one read, with optional weather columns', async () => {
+  await signedIn();
+  const weather = { lat: 10, lng: 20, time: ['2026-09-30T12:00', '2026-09-30T13:00'], wind_speed_10m: [10, 20], wind_direction_10m: [350, 10],
+    wind_gusts_10m: [14, 24], wave_height: [1, 2], wave_direction: [180, 200], ocean_current_velocity: [0.5, 1.5], ocean_current_direction: [90, 110], visibility: [24000, 20000], weather_code: [1, 2] };
+  const weatherNow = { wind_speed_kn: 15.46, wind_direction_deg: 0.17, wind_gusts_kn: 19.5, wave_height_m: 1.55, wave_direction_deg: 191, current_speed_kn: 1.04, current_direction_deg: 101 };
+  const lastPortCall = { port: { name: 'Russell', uuid: 'port-uuid' }, event_type: 'departure', event_timestamp: '2026-09-29T10:00:00Z' };
+  Object.assign(currentBoat, { awa: 45, time_since_last_update_seconds: 120, in_port: false, crew_role: null });
+  boatSnapshot = { weather, weather_now: weatherNow, weather_units: { wind_speed_10m: 'kn' }, last_port_call: lastPortCall };
+  const json = (await cli('--json', 'globe', 'boats', 'show', 'boat-key', '--columns', 'name')).json().data;
+  assert.deepEqual(json.weather, weather);
+  assert.deepEqual(json.weather_now, weatherNow);
+  assert.deepEqual(json.last_port_call, lastPortCall);
+  assert.deepEqual([json.boat.awa, json.boat.time_since_last_update_seconds, json.boat.in_port, json.boat.crew_role], [45, 120, false, null]);
+  assert.equal(requests.filter(r => r.path.startsWith('/api/v3/globe_boats')).length, 1);
+  const table = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,wind,wind-dir,current,wave,update-age,in-port');
+  assert.match(table.stdout, /^NAME\s+WIND \(kn\)\s+WIND DIR \(°\)\s+CURRENT \(kn\)\s+WAVE \(m\)\s+UPDATED \(s ago\)\s+IN PORT\nBoat\s+15\.5\s+0\.2\s+1\s+1\.6\s+120\s+false/);
+  const compact = await cli('globe', 'boats', 'show', 'boat-key');
+  assert.doesNotMatch(compact.stdout, /WIND|UPDATED|IN PORT/);
+  boatSnapshot = { weather: null, weather_now: null, last_port_call: null };
+  const missing = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,wind,wave');
+  assert.match(missing.stdout, /Boat\s+—\s+—/);
+});
+test('public boat profile JSON keeps an allowlist of useful sections and drops private ones', async () => {
+  const port = (name, extra = {}) => ({ uuid: `${name}-uuid`, name, p_lat: -35, p_lng: 174, typeName: 'port', internal_id: 7, ...extra });
+  boatSnapshot = {
+    weather: { time: ['2026-09-30T12:00'], wind_speed_10m: [12] },
+    port_calls: [{ port: { name: 'Russell', uuid: 'russell-uuid' }, event_type: 'arrival', event_timestamp: '2026-09-30T10:00:00Z' },
+      { port: { name: 'Auckland', uuid: 'auckland-uuid' }, event_type: 'departure', event_timestamp: '2026-09-29T10:00:00Z' }],
+    boat_stats: { overall: 120.5, yearly: [{ date: '2026-01-01', distance_nm: 120.5 }], monthly: [], daily: [], secret: 1 },
+    passages: [{ uuid: 'passage-uuid', startPort: port('Auckland'), endPort: port('Russell'), departedAt: '2026-09-29T10:00:00Z', arrivedAt: '2026-09-30T10:00:00Z',
+      durationSeconds: 86400, durationHuman: 'one day', rhumbDistanceNm: 120.5 }],
+    seas_visited: [{ sea: { name: 'Hauraki Gulf', featurecla: 'bay' }, first_visited_at: '2026-09-29T11:00:00Z', latest_visited_at: '2026-09-29T12:00:00Z', visit_count: 2 }],
+    boat_log: [{ timestamp: 1 }], boat_tracks: { hourly: {} }, crew_members: [{ name: 'Crew', memberId: 3 }],
+    possible_crew_roles: ['admin'], crew_applications: [{ id: 1 }], crew_invite_url: 'https://example.test/invite/secret',
+  };
+  const data = (await cli('--json', 'globe', 'boats', 'profile', 'boat-key')).json().data;
+  assert.deepEqual(Object.keys(data).sort(), ['boat', 'boat_stats', 'last_port_call', 'passages', 'races', 'seas_visited', 'weather']);
+  assert.deepEqual(data.weather, boatSnapshot.weather);
+  assert.deepEqual(data.last_port_call, boatSnapshot.port_calls[0]);
+  assert.deepEqual(data.boat_stats, { overall: 120.5, yearly: [{ date: '2026-01-01', distance_nm: 120.5 }], monthly: [], daily: [] });
+  assert.deepEqual(data.passages[0].endPort, { uuid: 'Russell-uuid', name: 'Russell', p_lat: -35, p_lng: 174, typeName: 'port' });
+  assert.equal(data.passages[0].rhumbDistanceNm, 120.5);
+  assert.deepEqual(data.seas_visited, [{ sea: { name: 'Hauraki Gulf' }, first_visited_at: '2026-09-29T11:00:00Z', latest_visited_at: '2026-09-29T12:00:00Z', visit_count: 2 }]);
+  assert.doesNotMatch(JSON.stringify(data), /invite|secret|memberId|internal_id/);
+  boatSnapshot = { weather: {}, port_calls: [] };
+  const empty = (await cli('--json', 'globe', 'boats', 'profile', 'boat-key')).json().data;
+  assert.deepEqual([empty.weather, empty.last_port_call], [null, null]);
+  assert.equal(requests.some(r => r.authorization), false);
+});
+test('boats history reads one bounded type per request and pages with the server cursor', async () => {
+  await signedIn();
+  boatSnapshot = { history: {
+    first: { items: [{ timestamp: '2026-09-30T12:02:00Z', p_lat: 1.3, p_lng: 2.3, heading: 110, last_speed_in_kts: 6.5, wind_speed: 12, offline: true }], next_cursor: 'CURSOR1', oldest_available_at: '2026-09-29T12:00:00Z' },
+    CURSOR1: { items: [{ timestamp: '2026-09-30T12:01:00Z', p_lat: 1.2, p_lng: 2.2, event: 'teleport' }], next_cursor: null, oldest_available_at: '2026-09-29T12:00:00Z' },
+  } };
+  const first = (await cli('--json', 'globe', 'boats', 'history', 'boat-key', '--limit', '1', '--since', '2026-09-30T00:00:00Z')).json().data;
+  assert.deepEqual(first.items[0], { timestamp: '2026-09-30T12:02:00Z', heading: 110, last_speed_in_kts: 6.5, wind_speed: 12, offline: true, latitude: 1.3, longitude: 2.3 });
+  assert.equal(first.next_cursor, 'CURSOR1');
+  const query = new URL(requests.at(-1).path, 'http://localhost').searchParams;
+  assert.deepEqual(Object.fromEntries(query), { type: 'logs', limit: '1', since: '2026-09-30T00:00:00Z' });
+  const second = await cli('globe', 'boats', 'history', 'boat-key', '--cursor', 'CURSOR1');
+  assert.match(second.stdout, /TIME \(UTC\)\s+LATITUDE \(°\).*NOTE\n2026-09-30T12:01:00Z\s+1\.20000\s+2\.20000.*teleport\nOldest retained log: 2026-09-29T12:00:00Z\n$/s);
+  assert.doesNotMatch(second.stdout, /More records/);
+  assert.match((await cli('globe', 'boats', 'history', 'boat-key')).stdout, /More records: add --cursor CURSOR1/);
+
+  boatSnapshot = { history: { first: { items: [{ port: { name: 'Russell', uuid: 'port-uuid', id: 5 }, event_type: 'arrival', event_timestamp: '2026-09-30T10:00:00Z' }], next_cursor: null } } };
+  const calls = await cli('--json', 'globe', 'boats', 'history', 'boat-key', '--type', 'port-calls');
+  assert.deepEqual(calls.json().data.items, [{ port: { name: 'Russell', uuid: 'port-uuid' }, event_type: 'arrival', event_timestamp: '2026-09-30T10:00:00Z' }]);
+  boatSnapshot = { history: { first: { items: [{ uuid: 'passage-uuid', startPort: { name: 'Auckland', uuid: 'a' }, endPort: { name: 'Russell', uuid: 'r' },
+    departedAt: '2026-09-29T10:00:00Z', arrivedAt: '2026-09-30T10:00:00Z', durationSeconds: 86400, rhumbDistanceNm: 120.5 }], next_cursor: null } } };
+  assert.match((await cli('globe', 'boats', 'history', 'boat-key', '--type', 'passages')).stdout, /passage-uuid\s+Auckland\s+Russell\s+2026-09-29T10:00:00Z\s+2026-09-30T10:00:00Z\s+120\.5\s+24/);
+
+  requests = [];
+  assert.equal((await cli('globe', 'boats', 'history', 'boat-key', '--limit', '500')).code, 2);
+  assert.equal((await cli('globe', 'boats', 'history', 'boat-key', '--type', 'tracks')).code, 2);
+  assert.equal(requests.length, 0);
+});
+test('boats list requests weather only when a weather column is selected', async () => {
+  await signedIn();
+  Object.assign(currentBoat, { time_since_last_update_seconds: 30 });
+  boatSnapshot = { weather_now: { wind_speed_kn: 12.34, wind_direction_deg: 270, current_speed_kn: 0.4, wave_height_m: 1.2 } };
+  const plain = await cli('globe', 'boats', 'list', '--mine', '--columns', 'name,speed,update-age');
+  assert.match(plain.stdout, /NAME\s+SPEED \(kn\)\s+UPDATED \(s ago\)\nBoat\s+—\s+30/);
+  assert.deepEqual(requests.filter(r => r.path.startsWith('/api/v3/globe_boats')).map(r => r.path), ['/api/v3/globe_boats']);
+  requests = [];
+  const weather = await cli('globe', 'boats', 'list', '--mine', '--columns', 'name,heading,wind,update-age');
+  assert.match(weather.stdout, /NAME\s+HEADING \(°\)\s+WIND \(kn\)\s+UPDATED \(s ago\)\nBoat\s+90\s+12\.3\s+30/);
+  assert.deepEqual(requests.filter(r => r.path.startsWith('/api/v3/globe_boats')).map(r => r.path), ['/api/v3/globe_boats?include=weather']);
+  const json = (await cli('--json', 'globe', 'boats', 'list', '--mine', '--columns', 'wind')).json().data;
+  assert.equal(json.boats[0].weather_now.wind_speed_kn, 12.34);
+  assert.deepEqual(json.weather_units, { wind_speed_10m: 'kn' });
+  assert.equal((await cli('--json', 'globe', 'boats', 'list', '--mine')).json().data.boats[0].weather_now, undefined);
 });
 test('invalid columns fail before reads or mutations', async () => {
   for (const columns of ['', 'name,', 'name,name', 'password', 'name,unknown']) {
@@ -846,6 +966,17 @@ test('offline logout explicitly reports unconfirmed revocation while clearing lo
   assert.equal(await auth.credentials.read(), undefined);
 });
 const posixUser = process.platform !== 'win32' && process.getuid?.() !== 0;
+test('saved login details without their tokens are reported accurately and can be cleared', { skip: !posixUser }, async () => {
+  const auth = await signedIn();
+  await rm(join(auth.credentials.directory, 'tokens.json'));
+  const missing = await cli('auth', 'status', '--local', '--json');
+  assert.equal(missing.code, 3);
+  assert.equal(missing.json().error.code, 'CREDENTIAL_MISSING');
+  assert.match(missing.json().error.message, /tokens are missing from the credential file.*marineverse login again/);
+  assert.deepEqual((await cli('auth', 'logout', '--json')).json().data, { logged_out: true, server_revocation_confirmed: false });
+  assert.equal((await cli('auth', 'status', '--local', '--json')).json().error.code, 'AUTH_REQUIRED');
+  assert.equal(requests.length, 0);
+});
 test('credential storage failures are typed and malformed local data can be cleared', { skip: !posixUser }, async () => {
   const auth = await signedIn();
   const { directory } = auth.credentials;

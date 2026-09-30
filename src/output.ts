@@ -13,12 +13,23 @@ function table(rows: any[], columns: [string, (row: any) => unknown][]): string 
 const raceColumns: [string, (row: any) => unknown][] = [['RACE KEY', r => r.publicKey], ['NAME', r => r.name], ['STATE', r => r.state], ['START (UTC)', r => r.startTime]];
 const rounded = (value: unknown) => typeof value === 'number' ? Math.round(value * 10) / 10 : value;
 const coordinate = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(5) : value;
-const boatColumns: [string, (row: any) => unknown][] = [['BOAT UUID', b => b.uuid], ['NAME', b => b.name], ['LATITUDE (°)', b => coordinate(b.latitude)], ['LONGITUDE (°)', b => coordinate(b.longitude)], ['HEADING (°)', b => rounded(b.heading)], ['SPEED (kn)', b => rounded(b.last_speed_kts ?? b.last_speed_in_kts)], ['LOCATION', b => b.location_name], ['MAIN', b => b.mainsail_hoist], ['JIB', b => b.jib_hoist], ['ANCHORED', b => b.is_anchored]];
+// Weather columns read the server's interpolated `weather_now` estimate, not the first forecast sample.
+const boatColumns: [string, (row: any) => unknown][] = [['BOAT UUID', b => b.uuid], ['NAME', b => b.name], ['LATITUDE (°)', b => coordinate(b.latitude)], ['LONGITUDE (°)', b => coordinate(b.longitude)], ['HEADING (°)', b => rounded(b.heading)], ['SPEED (kn)', b => rounded(b.last_speed_kts ?? b.last_speed_in_kts)], ['LOCATION', b => b.location_name], ['MAIN', b => b.mainsail_hoist], ['JIB', b => b.jib_hoist], ['ANCHORED', b => b.is_anchored],
+  ['WIND (kn)', b => rounded(b.weather_now?.wind_speed_kn)], ['WIND DIR (°)', b => rounded(b.weather_now?.wind_direction_deg)], ['CURRENT (kn)', b => rounded(b.weather_now?.current_speed_kn)],
+  ['WAVE (m)', b => rounded(b.weather_now?.wave_height_m)], ['UPDATED (s ago)', b => b.time_since_last_update_seconds], ['IN PORT', b => b.in_port]];
 const leaderboardColumns: [string, (row: any) => unknown][] = [['POS', e => e.position], ['BOAT UUID', e => e.boat.uuid], ['BOAT', e => e.boat.name], ['LATITUDE (°)', e => coordinate(e.boat.latitude)], ['LONGITUDE (°)', e => coordinate(e.boat.longitude)], ['STATE', e => e.state], ['DISTANCE (nm)', e => rounded(e.distanceToDestination)], ['RACE TIME (s)', e => rounded(e.raceTimeSeconds)], ['PENALTY (s)', e => e.penaltySeconds]];
-const tutorialColumns: [string, (row: any) => unknown][] = [['TUTORIAL', r => r.name], ['STATUS', r => r.status], ['STARTED (UTC)', r => r.started_at], ['FINISHED (UTC)', r => r.finished_at]];
+const historyColumns: Record<'logs' | 'port-calls' | 'passages', [string, (row: any) => unknown][]> = {
+  logs: [['TIME (UTC)', l => l.timestamp], ['LATITUDE (°)', l => coordinate(l.latitude)], ['LONGITUDE (°)', l => coordinate(l.longitude)], ['HEADING (°)', l => rounded(l.heading)],
+    ['SPEED (kn)', l => rounded(l.last_speed_in_kts)], ['SOG (kn)', l => rounded(l.sog)], ['WIND (kn)', l => rounded(l.wind_speed)], ['CURRENT (kn)', l => rounded(l.current_speed)],
+    ['AWA (°)', l => rounded(l.awa)], ['NOTE', l => l.event ?? (l.offline ? 'offline' : '')]],
+  'port-calls': [['TIME (UTC)', c => c.event_timestamp], ['EVENT', c => c.event_type], ['PORT', c => c.port?.name], ['PORT UUID', c => c.port?.uuid]],
+  passages: [['PASSAGE UUID', p => p.uuid], ['FROM', p => p.startPort?.name], ['TO', p => p.endPort?.name], ['DEPARTED (UTC)', p => p.departedAt],
+    ['ARRIVED (UTC)', p => p.arrivedAt], ['DISTANCE (nm)', p => rounded(p.rhumbDistanceNm)], ['DURATION (h)', p => typeof p.durationSeconds === 'number' ? rounded(p.durationSeconds / 3600) : null]],
+};
+const tutorialColumns:[string, (row: any) => unknown][] = [['TUTORIAL', r => r.name], ['STATUS', r => r.status], ['STARTED (UTC)', r => r.started_at], ['FINISHED (UTC)', r => r.finished_at]];
 const distanceColumns: [string, (row: any) => unknown][] = [['BOAT TYPE', r => r.boat_type], ['DISTANCE (nm)', r => rounded(r.total_distance_nm)], ['TIME (min)', r => rounded(r.total_time_minutes)]];
 export const columnNames = {
-  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored'],
+  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port'],
   races: ['key', 'name', 'state', 'start'],
   leaderboard: ['position', 'uuid', 'name', 'latitude', 'longitude', 'state', 'distance', 'race-time', 'penalty'],
   tutorials: ['name', 'status', 'started', 'finished'],
@@ -34,8 +45,10 @@ export function validateColumns(kind: TableKind, requested?: string): string[] |
   }
   return columns;
 }
+// Optional columns appear only when requested with --columns, keeping default tables compact.
+const optionalColumns: Partial<Record<TableKind, number>> = { boats: 10 };
 function selected(kind: TableKind, columns: [string, (row: any) => unknown][], names?: string[]) {
-  return names ? names.map(name => columns[columnNames[kind].indexOf(name)]!) : columns;
+  return names ? names.map(name => columns[columnNames[kind].indexOf(name)]!) : columns.slice(0, optionalColumns[kind]);
 }
 
 function richText(value: any, source: string): string {
@@ -104,6 +117,11 @@ export function human(data: any, columns?: string[]): string {
     return `${data.name ? `${safe(data.name)} (${safe(data.publicKey)})\n` : ''}${details ? `${details}\n` : ''}${table(data.entries, selected('leaderboard', leaderboardColumns, columns))}`;
   }
   if (data.boats) return table(data.boats, selected('boats', boatColumns, columns));
-  if (data.boat) return `${table([data.boat], selected('boats', boatColumns, columns))}${data.warning ? `\n${safe(data.warning)}` : ''}${data.verified === true ? '\nUpdate verified.' : ''}`;
+  if (data.items && data.type in historyColumns) {
+    const notes = [data.oldest_available_at !== undefined ? `Oldest retained log: ${safe(data.oldest_available_at)}` : '',
+      data.next_cursor ? `More records: add --cursor ${safe(data.next_cursor)}` : ''].filter(Boolean);
+    return [table(data.items, historyColumns[data.type as keyof typeof historyColumns]), ...notes].join('\n');
+  }
+  if (data.boat) return `${table([{ ...data.boat, weather_now: data.weather_now }], selected('boats', boatColumns, columns))}${data.warning ? `\n${safe(data.warning)}` : ''}${data.verified === true ? '\nUpdate verified.' : ''}`;
   return Object.entries(data).map(([key, value]) => `${key}: ${safe(typeof value === 'object' ? JSON.stringify(value) : value)}`).join('\n');
 }
