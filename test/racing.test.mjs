@@ -323,7 +323,10 @@ test('reviewed race and series projections keep qualifications, contributions an
   const local = new MarineVerseClient({ ...environment, webUrl: 'http://localhost:3005' });
   assert.equal(local.racing.link({ links: { web: 'http://localhost:3005/marineverse-cup/race/race-one' } }), 'http://localhost:3005/marineverse-cup/race/race-one');
   assert.equal(local.racing.link({ links: { web: 'https://www.marineverse.com/marineverse-cup/race/race-one' } }), 'https://www.marineverse.com/marineverse-cup/race/race-one');
-  for (const url of ['https://evil.marineverse.com/', 'https://www.marineverse.com.evil.test/', 'https://user:password@www.marineverse.com/', 'http://www.marineverse.com/']) assert.throws(() => local.racing.link({ links: { web: url } }), error => error.code === 'INVALID_RESPONSE');
+  const credentialUrl = new URL('https://www.marineverse.com/');
+  credentialUrl.username = 'synthetic-user';
+  credentialUrl.password = 'synthetic-password';
+  for (const url of ['https://evil.marineverse.com/', 'https://www.marineverse.com.evil.test/', credentialUrl.href, 'http://www.marineverse.com/']) assert.throws(() => local.racing.link({ links: { web: url } }), error => error.code === 'INVALID_RESPONSE');
 });
 
 test('daily briefs use one authenticated read, preserve calendar dates and label unavailable optional opportunities', async () => {
