@@ -1,6 +1,6 @@
 # MarineVerse CLI
 
-Browse Globe races and public boat profiles, sign in through the MarineVerse website, and control boats you own or crew.
+Explore Multiplayer, Daily Race Practice and Globe racing, read your sailing progress, and control boats you own or crew.
 
 This is a V1 preview. The public production OAuth client ID is included.
 
@@ -104,6 +104,78 @@ Use `progress show --columns name,status` or `stats distance --columns boat,dist
 
 Login handles all required permissions. If an older session needs updated permissions, run `marineverse login` again. No extra feature settings are needed.
 
+## Racing
+
+Explore recent races and public rankings, then use returned public keys to read results and performance:
+
+```sh
+marineverse racing leagues list
+marineverse racing multiplayer races list --boat yacht
+marineverse racing multiplayer schedule
+marineverse racing multiplayer ratings list --boat yacht
+marineverse racing drp races list --league LEAGUE_KEY
+marineverse racing drp ratings list --league LEAGUE_KEY --country AU
+marineverse racing drp series list --league LEAGUE_KEY
+marineverse racing drp series list --league LEAGUE_KEY --type monthly --status past
+marineverse racing tournaments list
+marineverse racing tournaments show TOURNAMENT_KEY --json
+marineverse racing drp races show RACE_KEY --json
+marineverse racing drp races leaderboard RACE_KEY
+marineverse racing drp races summary RACE_KEY
+marineverse racing drp races stats RACE_KEY
+marineverse racing drp entries show ENTRY_KEY --json
+marineverse racing drp entries legs ENTRY_KEY
+marineverse racing drp entries compare ENTRY_KEY OTHER_ENTRY_KEY --json
+marineverse racing drp series show SERIES_KEY --json
+marineverse racing drp series leaderboard SERIES_KEY
+```
+
+Multiplayer supports the same race and entry commands. Entry `stats` and `maneuvers` read individual performance sections. Comparisons return the two entries, their real stat differences, race legs and a visual comparison link. Race details return existing AI summaries when visible; comparisons do not return stored AI reports. Reading results never generates a summary. Preserve server ranking order, points, handicaps and penalties. Race times and numeric leg start/end timestamps are seconds, speeds knots and recorded leg distances meters; JSON preserves precision and missing values. Human leg duration uses numeric end minus start, or explicit `duration_seconds`, labelled `s`. Raw `duration` is shown as recorded with units unspecified and stays unchanged in JSON.
+
+DRP rankings support `--type rating|wins|streaks`; `--date YYYY-MM-DD` selects a rating date. Multiplayer rankings support `--type rating|participation`, with `--days 30` for recent participation. Rankings support country, region, subregion, state and city filters. Listings and rankings support `--page` for more history. `multiplayer schedule` reads the MarineVerse API's regular community sessions with their local times, IANA time zones, next UTC starts and volunteers. Public discovery needs no login. League, race, series and tournament reads use a saved session when present to include permitted personal context. Premium unrevealed DRP opponents' results stay hidden; Intro can expose basic live standings, but opponents' detailed analytics remain restricted until reveal. A saved login can reveal your own entry.
+
+Normal login enables your racing dashboard and personal lists:
+
+```sh
+marineverse login
+marineverse racing dashboard --json
+marineverse racing today --json
+marineverse racing yesterday --json
+marineverse racing activity --type drp --since 2026-09-01 --until 2026-09-30 --json
+marineverse racing drp ratings show
+marineverse racing drp ratings show --league LEAGUE_KEY
+marineverse racing drp ratings explain
+marineverse racing multiplayer ratings show --boat yacht
+marineverse racing leagues list --mine
+marineverse racing multiplayer races list --mine
+marineverse racing drp races list --mine
+marineverse racing globe races list --mine
+marineverse racing drp entries list --mine --since 2026-09-30T00:00:00Z
+marineverse racing drp entries list --mine --race RACE_KEY --page 2
+marineverse racing tournaments list --mine
+```
+
+`ratings show` reads your own rating by default; `--profile PROFILE_KEY` reads a public sailor. DRP defaults to the global rating, with `--league` for league ratings. The result labels the requested date and the actual rating snapshot date; an older snapshot is not today's result. `ratings explain` shows the calculator's per-race contributions and whether they reconcile with the saved points change. Multiplayer returns the stored boat rating; historical changes remain unavailable when the source has no history.
+
+`activity` returns your calendar's daily counts and streak totals in your account's time zone, including zero-activity dates in JSON. `entries list --mine` returns individual attempts with optional `--since` and `--page`. Series lists support `--type weekly|monthly|seasonal` and `--status current|past|upcoming`, based on series start/end dates. Tournament details include participants, registration state and scheduled matches.
+
+`racing today` combines your day's attempts with available DRP practice, upcoming community sessions and Globe opportunities. `racing yesterday` reports yesterday's actual calendar activity. Dates use your account time zone; current owned/crewed Globe participation is labelled separately and does not prove a boat was yours yesterday. An unavailable community schedule is reported as unavailable.
+
+To share a canonical visual replay, print the returned links or explicitly open a view:
+
+```sh
+marineverse racing drp races links RACE_KEY --json
+marineverse racing drp races open RACE_KEY --view map_3d
+marineverse racing multiplayer entries open ENTRY_KEY --view chart --no-browser
+marineverse racing drp entries compare ENTRY_KEY OTHER_ENTRY_KEY --open
+```
+
+Views are `web`, `map_2d`, `map_3d` and `chart` where available. `links` prints URLs; only `open` or `compare --open` launches a browser. Add `--no-browser` to print the selected URL. Existing `globe races` commands remain available.
+
+Racing lists, standings, race results and entry legs support ordered table
+columns, for example `racing drp ratings list --columns name,points,change`.
+Check the command's help for supported columns; this never filters JSON.
+
 ## Useful links
 
 ```sh
@@ -187,10 +259,13 @@ Use a public UUID or slug returned by search or your club list. `clubs` is an al
 
 Operators: deploy the club membership API and frontend consent descriptions, then run `bin/rails marineverse_cli:register` to add `clubs_read` and `clubs_write` to the existing CLI application.
 
-## Public FAQs and history
+## Public FAQs, sailing terms and history
 
 ```sh
 marineverse faq                         # Discover public FAQ topics
+marineverse terms show "apparent wind" # Read a sailing glossary definition
+marineverse terms search "wind"        # Search terms and definitions
+marineverse terms list --page 2         # Browse the glossary alphabetically
 marineverse faq marineverse-sailing-club # Read a topic from the catalog
 marineverse history --limit 5
 marineverse sailing-club changelog latest
@@ -202,6 +277,8 @@ marineverse content search "multiplayer" --json
 ```
 
 These guest commands read first-party FAQs and Sailing Club updates without login. Answers retain their source URLs and links; JSON includes the original rich content. `history` shows the latest ten major updates and patch notes by default. Search is a keyword search across FAQs and history, with five results by default. Both accept `--limit 1` through `20`; FAQ details, history, and search accept `--locale en-US` (unsupported languages fall back to English).
+
+`terms show` looks up an exact glossary term, ignoring case. `terms search` searches published terms and definitions; `terms list` browses alphabetically. Lists and searches default to 20 definitions and accept `--limit 1` through `20` and `--page`. All glossary commands work without login and include their source URL.
 
 Search includes English alongside the requested language and reports the actual language of each result, without repeating the same question or release.
 
@@ -368,7 +445,7 @@ Configuration precedence is command flags, `MARINEVERSE_ENV` / `MARINEVERSE_API_
 
 Every API request, including OAuth, identifies itself with `User-Agent: marineverse-cli/<version>`, `X-MarineVerse-Client: marineverse-cli`, and `X-MarineVerse-Client-Version: <version>`, using the installed CLI version. These are diagnostic labels, not authentication; servers must not trust them for authorization.
 
-Requests time out after 15 seconds. GET requests retry at most twice for HTTP 429/502/503/504, with exponential backoff and jitter. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Network failures, mutations, and token exchanges are not automatically retried. Check state after an ambiguous mutation failure before retrying. Requests do not poll in the background or follow redirects. Only `auth login` and explicit `open` / `view-3d` commands launch a browser. Concurrent token refresh is serialized per credential.
+Ordinary requests allow 15 seconds per attempt. GET requests retry at most twice for transient connection failures, timeouts, and HTTP 429/502/503/504, with a shared 30-second request budget including backoff and any token refresh. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Mutations and token exchanges are never automatically replayed. Check state after an ambiguous mutation failure before retrying. Optional `error.diagnostics` includes a sanitized cause, request stage, elapsed milliseconds, attempt count, and a request ID when available; share these when reporting a failure. Requests do not poll in the background or follow redirects. Only login (`login` or `auth login`), explicit `open` / `view-3d` commands, and racing `compare --open` can launch a browser; `--no-browser` suppresses launching. Concurrent token refresh is serialized per credential.
 
 ## Development and release checks
 

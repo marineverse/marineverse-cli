@@ -9,6 +9,22 @@ export interface HistoryOptions extends ContentOptions {
 export class ContentClient {
   constructor(private readonly apiUrl: string) {}
 
+  async terms(query?: string, options: { page?: number; limit?: number } = {}) {
+    if (query !== undefined && (!query.trim() || query.length > 200)) usage('Search must contain 1–200 characters.');
+    const page = options.page ?? 1, limit = options.limit ?? 20;
+    if (!Number.isInteger(page) || page < 1 || page > 10000) usage('--page must be an integer from 1 to 10000.');
+    const result = await this.get('/sailing-terms', { limit }, query?.trim(), { page: String(page) });
+    if (!Array.isArray(result.terms) || !result.terms.every((entry: any) => typeof entry.term === 'string' && typeof entry.definition === 'string') || typeof result.source !== 'string') throw new CliError('INVALID_RESPONSE', 'Expected sailing glossary terms.');
+    return { glossary: result };
+  }
+
+  async term(term: string) {
+    if (!term.trim() || term.length > 200) usage('Term must contain 1–200 characters.');
+    const result = await this.get('/sailing-terms/lookup', {}, undefined, { term: term.trim() });
+    if (typeof result.term !== 'string' || typeof result.definition !== 'string' || typeof result.source !== 'string') throw new CliError('INVALID_RESPONSE', 'Expected a sailing glossary definition.');
+    return { term: result };
+  }
+
   private async get(path: string, options: ContentOptions = {}, query?: string, filters: Record<string, string | boolean> = {}) {
     if (options.locale !== undefined && !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(options.locale)) usage('Use a language code such as en-US for --locale.');
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 20)) usage('--limit must be an integer from 1 to 20.');

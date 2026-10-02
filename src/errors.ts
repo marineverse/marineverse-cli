@@ -1,5 +1,15 @@
+export type RequestDiagnostics = {
+  elapsed_ms: number;
+  stage: 'headers' | 'body' | 'backoff';
+  attempts: number;
+  cause: string;
+  request_id?: string;
+  http_status?: number;
+};
+
 export class CliError extends Error {
-  constructor(public code: string, message: string, public exitCode = 7, public retryAfterSeconds?: number, public oauthError?: string) {
+  constructor(public code: string, message: string, public exitCode = 7, public retryAfterSeconds?: number, public oauthError?: string,
+    public diagnostics?: RequestDiagnostics) {
     super(message);
   }
 }

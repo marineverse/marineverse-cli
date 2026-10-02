@@ -1,15 +1,7 @@
-import { stripVTControlCharacters } from 'node:util';
 import { usage } from './errors.js';
-
-export function safe(value: unknown): string {
-  return stripVTControlCharacters(String(value ?? '—')).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
-}
-function table(rows: any[], columns: [string, (row: any) => unknown][]): string {
-  if (!rows.length) return '(none)';
-  const cells = [columns.map(([title]) => title), ...rows.map(row => columns.map(([, get]) => safe(get(row))))];
-  const widths = columns.map((_, i) => Math.max(...cells.map(row => row[i].length)));
-  return cells.map(row => row.map((cell, i) => cell.padEnd(widths[i])).join('  ').trimEnd()).join('\n');
-}
+import { racingHuman, racingColumnNames } from './racing-output.js';
+import { safe, table } from './format.js';
+export { safe } from './format.js';
 const raceColumns: [string, (row: any) => unknown][] = [['RACE KEY', r => r.publicKey], ['NAME', r => r.name], ['STATE', r => r.state], ['START (UTC)', r => r.startTime]];
 const rounded = (value: unknown) => typeof value === 'number' ? Math.round(value * 10) / 10 : value;
 const coordinate = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(5) : value;
@@ -29,6 +21,7 @@ const historyColumns: Record<'logs' | 'port-calls' | 'passages', [string, (row: 
 const tutorialColumns:[string, (row: any) => unknown][] = [['TUTORIAL', r => r.name], ['STATUS', r => r.status], ['STARTED (UTC)', r => r.started_at], ['FINISHED (UTC)', r => r.finished_at]];
 const distanceColumns: [string, (row: any) => unknown][] = [['BOAT TYPE', r => r.boat_type], ['DISTANCE (nm)', r => rounded(r.total_distance_nm)], ['TIME (min)', r => rounded(r.total_time_minutes)]];
 export const columnNames = {
+  ...racingColumnNames,
   boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port'],
   races: ['key', 'name', 'state', 'start'],
   leaderboard: ['position', 'uuid', 'name', 'latitude', 'longitude', 'state', 'distance', 'race-time', 'penalty'],
@@ -66,7 +59,11 @@ function richText(value: any, source: string): string {
 }
 
 export function human(data: any, columns?: string[]): string {
+  const racing = racingHuman(data, columns);
+  if (racing !== undefined) return racing;
   if (data.topics) return table(data.topics, [['TOPIC', topic => topic.slug], ['TITLE', topic => topic.title], ['URL', topic => topic.url]]);
+  if (data.term) return `${safe(data.term.term)}\n${safe(data.term.definition)}\nSource: ${safe(data.term.source)}`;
+  if (data.glossary) return `${data.glossary.terms.map((entry: any) => `${safe(entry.term)}\n${safe(entry.definition)}`).join('\n\n') || 'No matching sailing terms found.'}\n\nPage ${safe(data.glossary.page)} · ${safe(data.glossary.total)} results\nSource: ${safe(data.glossary.source)}`;
   if (data.faq) {
     const faq = data.faq;
     return `${safe(faq.title)}\nSource: ${safe(faq.source || faq.url)}\n\n${faq.content.sections.map((section: any) =>

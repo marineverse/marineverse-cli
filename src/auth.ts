@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { Environment } from './config.js';
 import { Credentials, type Credential, type Storage } from './credentials.js';
 import { CliError, authRequired } from './errors.js';
-import { request } from './http.js';
+import { request, RequestBudget, REQUEST_TIMEOUT_MS } from './http.js';
 import { callbackPage } from './callback-page.js';
 
 export async function callback(timeoutMs = 180_000) {
@@ -119,10 +119,10 @@ export class Auth {
     return this.environment.clientId || authRequired('Configure a MarineVerse CLI client ID for this API origin with config set.');
   }
 
-  private token(parameters: Record<string, string>) {
+  private token(parameters: Record<string, string>, budget?: RequestBudget) {
     return request(`${this.environment.apiUrl}/oauth/token`, {
       method: 'POST', body: new URLSearchParams({ ...parameters, client_id: this.clientId() }),
-    });
+    }, REQUEST_TIMEOUT_MS, false, budget);
   }
 
   async login(options: { browser: boolean; storage: Storage; announce: (url: string) => void }) {
@@ -198,14 +198,14 @@ export class Auth {
     return { user_uuid: user.uuid, display_name: user.display_name, scopes: credential.scopes, expires_at: new Date(credential.expiresAt).toISOString() };
   }
 
-  async accessToken(rejectedToken?: string): Promise<string> {
+  async accessToken(rejectedToken?: string, budget?: RequestBudget): Promise<string> {
     this.clientId();
     return this.credentials.lock(async () => {
       const credential = await this.credentials.read();
       if (!credential) return authRequired();
       if (credential.expiresAt > Date.now() + 30_000 && credential.accessToken !== rejectedToken) return credential.accessToken;
       let body;
-      try { body = await this.token({ grant_type: 'refresh_token', refresh_token: credential.refreshToken }); }
+      try { body = await this.token({ grant_type: 'refresh_token', refresh_token: credential.refreshToken }, budget); }
       catch (error) {
         if (error instanceof CliError && [3, 6].includes(error.exitCode)) return authRequired('Login has expired or was revoked. Run auth login again.');
         throw error;
@@ -217,12 +217,13 @@ export class Auth {
   }
 
   async get(path: string, requiredScope?: string, retryReads = true): Promise<any> {
-    const token = await this.accessToken();
+    const budget = new RequestBudget();
+    const token = await this.accessToken(undefined, budget);
     await this.requireScope(requiredScope);
-    try { return await request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } }, 15_000, retryReads); }
+    try { return await request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } }, REQUEST_TIMEOUT_MS, retryReads, budget); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== 'AUTH_REQUIRED') throw error;
-      return request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${await this.accessToken(token)}` } }, 15_000, retryReads);
+      return request(`${this.environment.apiUrl}${path}`, { headers: { Authorization: `Bearer ${await this.accessToken(token, budget)}` } }, REQUEST_TIMEOUT_MS, retryReads, budget);
     }
   }
 
@@ -257,15 +258,8 @@ export class Auth {
   async post(path: string, body: unknown, scope: string) {
     const token = await this.accessToken();
     await this.requireScope(scope);
-    try {
-      return await request(`${this.environment.apiUrl}${path}`, { method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120_000);
-    } catch (error) {
-      if (error instanceof CliError && error.code === 'NETWORK_ERROR') {
-        throw new CliError('NETWORK_ERROR', 'Could not reach MarineVerse. Please try again.');
-      }
-      throw error;
-    }
+    return request(`${this.environment.apiUrl}${path}`, { method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120_000);
   }
 
   async logout() {

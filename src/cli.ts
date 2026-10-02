@@ -9,6 +9,7 @@ import { openBrowser, chooseLoginMethod, confirmDeviceLogin, type LoginMethod } 
 import { bundledSkill, manageSkill, type SkillAction } from './skills.js';
 import { feedbackFilters, feedbackSorts, roadmapFilters } from './feedback.js';
 import { marineverseLinks } from './links.js';
+import { registerRacingCommands } from './racing-commands.js';
 
 export interface Services {
   client: (environment: Environment) => MarineVerseClient;
@@ -70,7 +71,7 @@ function registerFeatureCommands(program: Command, services: Services): void {
     const columns = kind ? validateColumns(kind, command.opts().columns) : undefined;
     const environment = await resolveEnvironment(options);
     const data = await action(services.client(environment));
-    services.stdout(options.json ? `${JSON.stringify({ schema_version: 1, data, meta: { environment: environment.name } })}\n` : `${human(data, columns)}\n`);
+    if (data !== undefined) services.stdout(options.json ? `${JSON.stringify({ schema_version: 1, data, meta: { environment: environment.name } })}\n` : `${human(data, columns)}\n`);
   };
   // Positional arguments are captured by each handler; execution remains shared.
   const invoke = async (command: Command, action: (client: MarineVerseClient) => Promise<unknown>) => execute(action)(command.opts(), command);
@@ -96,6 +97,7 @@ function registerFeatureCommands(program: Command, services: Services): void {
         await showUrl(command, url, opts.browser, { environment: environment.name });
       });
   };
+  registerRacingCommands(program, { invoke, showUrl, tableCommand });
   const links = program.command('links').description('List, print, or open useful MarineVerse links');
   const listLinks = (_opts: unknown, command: Command) => {
     const data = { links: marineverseLinks };
@@ -245,6 +247,14 @@ function registerFeatureCommands(program: Command, services: Services): void {
   changelog.command('version <version>').description('Read one exact release version').option('--locale <code>', 'Language code, such as en-US')
     .action((version, opts, command) => invoke(command, client => client.content.changelog({ locale: opts.locale, version })));
   const content = program.command('content').description('Search public FAQs and Sailing Club patch notes without login');
+  const terms = program.command('terms').description('Read the public sailing glossary without login');
+  const termOptions = (command: Command) => command.option('--page <number>', 'Page number, 1–10000', '1').option('--limit <count>', 'Maximum definitions, 1–20', '20');
+  termOptions(terms.command('list').description('List sailing terms alphabetically'))
+    .action((opts, command) => invoke(command, client => client.content.terms(undefined, { page: Number(opts.page), limit: Number(opts.limit) })));
+  termOptions(terms.command('search <query>').description('Search sailing terms and definitions'))
+    .action((query, opts, command) => invoke(command, client => client.content.terms(query, { page: Number(opts.page), limit: Number(opts.limit) })));
+  terms.command('show <term>').description('Read an exact term, ignoring case')
+    .action((term, _opts, command) => invoke(command, client => client.content.term(term)));
   const clubs = program.command('groups').alias('clubs').description('Find sailing clubs and schools, and manage your memberships');
   clubs.command('list').alias('my').description('List your memberships and pending join requests')
     .action(execute(client => client.clubs.list()));
@@ -353,7 +363,7 @@ function registerFeatureCommands(program: Command, services: Services): void {
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
-  for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, content, sailingClub, clubs, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
+  for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, content, terms, sailingClub, clubs, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
   }
@@ -385,8 +395,8 @@ export async function run(argv: string[], services: Services = defaults, applica
         ? new CliError('FILESYSTEM_ERROR', `A local file operation failed (${errno(error)}${typeof syscall === 'string' && /^[a-z]+$/.test(syscall) ? ` during ${syscall}` : ''}). Check permissions under ${configDir()}.`, 2)
         : new CliError('INTERNAL_ERROR', 'Operation failed. Check your configuration and credential store.');
     const message = application.name ? failure.message.replace(/\bmarineverse (?=login\b|auth\b)/g, `${application.name} `) : failure.message;
-    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message, retry_after_seconds: failure.retryAfterSeconds } })}\n`);
-    else services.stderr(`${failure.code}: ${safe(message)}\n`);
+    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message, retry_after_seconds: failure.retryAfterSeconds, diagnostics: failure.diagnostics } })}\n`);
+    else services.stderr(`${failure.code}: ${safe(message)}${failure.diagnostics ? ` (${failure.diagnostics.cause}; ${failure.diagnostics.stage}; ${failure.diagnostics.elapsed_ms}ms; ${failure.diagnostics.attempts} attempts${failure.diagnostics.request_id ? `; request ${failure.diagnostics.request_id}` : ''})` : ''}\n`);
     return failure.exitCode;
   }
 }

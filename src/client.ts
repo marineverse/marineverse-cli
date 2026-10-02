@@ -5,6 +5,7 @@ import { request } from './http.js';
 import { FeedbackClient } from './feedback.js';
 import { ContentClient } from './content.js';
 import { ClubsClient } from './clubs.js';
+import { RacingClient } from './racing.js';
 
 function object(value: any): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CliError('INVALID_RESPONSE', 'Unexpected API response structure.');
@@ -77,11 +78,13 @@ export class MarineVerseClient {
   readonly feedback: FeedbackClient;
   readonly content: ContentClient;
   readonly clubs: ClubsClient;
+  readonly racing: RacingClient;
   constructor(readonly environment: Environment) {
     this.auth = new Auth(environment);
     this.feedback = new FeedbackClient(this.auth);
     this.content = new ContentClient(environment.apiUrl);
     this.clubs = new ClubsClient(environment.apiUrl, this.auth);
+    this.racing = new RacingClient(environment, this.auth);
   }
   private publicGet(path: string) { return request(`${this.environment.apiUrl}/api/v2/globe${path}`); }
 

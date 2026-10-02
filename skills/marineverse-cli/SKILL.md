@@ -1,6 +1,6 @@
 ---
 name: marineverse-cli
-description: Install and use the MarineVerse CLI for sailing club discovery and memberships, public content, Globe races and boats, account progress and statistics, feedback, and sailing guidance.
+description: Install and use the MarineVerse CLI for racing results and performance, sailing clubs, public content, Globe boats, account progress, feedback, and sailing guidance.
 license: Apache-2.0
 ---
 
@@ -21,8 +21,8 @@ Production is the default. Preserve saved environments and credentials. Public d
 Read only the reference needed for the task:
 
 - Discover organizations or list, join and leave your clubs: [clubs and memberships](references/clubs.md).
-- FAQs, product releases, links and Discord: [public content](references/public-content.md).
-- Public Globe races and boat profiles: [races and profiles](references/races.md).
+- FAQs, sailing glossary, product releases, links and Discord: [public content](references/public-content.md).
+- Multiplayer, Daily Race Practice and Globe races, entry performance, comparisons, and boat profiles: [racing and profiles](references/races.md).
 - Profile, lessons and lifetime distance: [account data](references/account.md).
 - Requested heading, sails, anchor or rename: [boat controls](references/boat-controls.md).
 - Roadmap, posts, comments and votes: [feedback](references/feedback.md).

@@ -6,6 +6,8 @@ For product, setup, and release questions, start with guest content: `marinevers
 
 For application releases use `marineverse sailing-club changelog latest`, `changelog version VERSION`, or `changelog list` with inclusive `--from-version`/`--to-version` or ISO `--from-date`/`--to-date` ranges. `list --all` retrieves the entire archive; otherwise lists default to ten releases. `release-notes` and `history` are aliases for the product's `changelog`. These are Sailing Club application releases, separate from the CLI's version.
 
+Use `marineverse terms show "TERM"` for an exact case-insensitive sailing glossary lookup, `terms search "QUERY"` to search terms and definitions, or `terms list` to browse alphabetically. No login is needed. Lists and searches default to 20 definitions; use `--limit 1` through `20` and `--page` to browse. Preserve the returned definition and source URL; an unknown term is not evidence for an invented meaning.
+
 ## Useful links
 
 Use `marineverse links` or `marineverse links list --json` to discover useful destinations without login or API access. Print a link with `marineverse links url NAME`; open it on the CLI's machine with `marineverse links open NAME` (or add `--no-browser` to print it). Names are `website`, `llms`, `dashboard`, `try-sailing`, `history`, `links`, `steam`, `quest`, `cli`, `mcp`, and `discord`. These links always point to public production destinations; website pages use the browser's own session.
