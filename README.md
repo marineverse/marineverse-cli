@@ -319,7 +319,7 @@ node ./bin/marineverse.js --env local globe races leaderboard RACE_PUBLIC_KEY --
 node ./bin/marineverse.js --env local globe boats profile BOAT_UUID
 ```
 
-Copy race keys and boat UUIDs from command output. The race list includes registration-open, active, and the latest ten finished races. Private boat profiles retain their normal access restrictions.
+Copy race keys and boat UUIDs from command output. The race list includes registration-open, active, and the latest ten finished races. `races show` and `races leaderboard` return 25 leaderboard entries per page, with race-wide positions and `entries_pagination`; add `--page 2` for the next page. Private boat profiles retain their normal access restrictions.
 
 `races show --json` also includes the race `origin`, `destination` (name and position), and `course` (the ordered waypoints, gates, and marks; `features` is empty for a direct race). Each leaderboard entry in `show` and `leaderboard` JSON includes `nextFeature` (id, kind, name, sequence) alongside `nextFeatureDistanceNm`; both are `null` when there is no next feature.
 
@@ -385,6 +385,9 @@ node ./bin/marineverse.js --env local globe boats list --mine
 node ./bin/marineverse.js --env local globe boats show YOUR_BOAT_UUID
 node ./bin/marineverse.js --env local globe boats set-heading YOUR_BOAT_UUID --degrees 215
 node ./bin/marineverse.js --env local globe boats rename YOUR_BOAT_UUID --name "New Boat Name"
+node ./bin/marineverse.js --env local globe boats list --followed
+node ./bin/marineverse.js --env local globe boats follow BOAT_UUID
+node ./bin/marineverse.js --env local globe boats unfollow BOAT_UUID
 node ./bin/marineverse.js --env local auth logout
 ```
 
@@ -401,6 +404,8 @@ For device login, open the printed URL on any device, sign in, check that the co
 `--no-browser` prevents opening a browser; it does not select the login method. Scripts and `--json` never prompt, so pass `--device-auth` for remote login. The CLI never asks for your MarineVerse password.
 
 Heading and sail changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
+
+`boats list --followed` lists the active boats you follow, newest activity first (up to 100). JSON includes each boat's `owner`, `approved`, and `profile_url`; add `--columns name,owner,latitude,longitude,update-age` to show the owner in the table. `boats list` takes exactly one of `--mine` or `--followed`. `follow` and `unfollow` take a boat UUID from command output, such as a leaderboard. Only public boats can be followed from the CLI; to follow a private owner's boat, use the owner's invite link on the website. You cannot follow your own boats.
 
 ### Sails and anchoring
 

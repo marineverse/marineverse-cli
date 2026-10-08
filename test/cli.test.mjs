@@ -21,13 +21,17 @@ const originalFetch = globalThis.fetch;
 
 let server, directory, environment, requests, currentBoat, refreshCount, failRead, failure, sailingData, deviceStart, devicePolls, revokeStatuses, boatSnapshot;
 const race = { publicKey: 'race-key', name: 'Test Race', state: 'active', entries: [{ position: 1,
-  boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }] };
+  boat: { uuid: 'boat-key', name: 'Boat', heading: 90, id: 999 }, owner: { name: 'Owner', uuid: 'owner-key', id: 123 }, penaltySeconds: 30 }],
+  entriesPagination: { current_page: 1, per_page: 25, total_entries: 1, total_pages: 1 } };
 const feedbackPost = { uuid: 'post-uuid', slug: 'better-docking', board_slug: 'sailing', title: 'Better docking', description: 'More practice.\n\nIn strong wind.',
   status: 'planned', vote_count: 2, comment_count: 1, upvoted_by_me: true, id: 99,
   author: { name: 'Test Sailor', uuid: 'profile-uuid', email: 'private@example.test', id: 88 },
   upvoted_by: [{ name: 'A voter', id: 77 }], similar_posts: [{ slug: 'related', board_slug: 'sailing', title: 'Related idea', vote_count: 3 }],
   comments: [{ uuid: 'comment-uuid', content: 'Great idea!', author: { name: 'A commenter', id: 66 }, vote_count: 1, replies: [
     { uuid: 'reply-uuid', content: 'Thanks.', author: { name: 'A reply author' }, vote_count: 0 }] }] };
+const followedBoat = { uuid: 'followed-key', name: 'Sea Breeze', latitude: -36.84, longitude: 174.76, heading: 45, location_name: 'Hauraki Gulf', last_speed_kts: 6.5,
+  time_since_last_update_seconds: 600, is_anchored: false, owner: { name: 'Skipper Sam', country_code: 'NZ', id: 77 }, approved: true,
+  profile_url: 'https://www.marineverse.com/globe/boats-profiles/followed-key', id: 998 };
 
 before(async () => {
   for (const key of Object.keys(inheritedEnvironment)) delete process.env[key];
@@ -88,7 +92,7 @@ before(async () => {
     if (req.url === '/api/v3/knowledge_base/00000000-0000-4000-8000-000000000001') return send(200, { article: { uuid: '00000000-0000-4000-8000-000000000001', title: 'Reefing', content: 'Reduce sail.\n\nKeep control.', id: 99 } });
     if (req.url === '/api/v3/ai/ask') return send(200, { answer: 'Ease the sheet.\nThen reef.', interaction_uuid: '00000000-0000-4000-8000-000000000002', tokens: { consumed: 20, remaining: 73 }, user_id: 99 });
     if (req.url === '/api/v2/globe/races') return send(200, { registration_open_races: [], active_races: [race], finished_races: [] });
-    if (req.url === '/api/v2/globe/races/race-key') return send(200, { race });
+    if (new URL(req.url, 'http://localhost').pathname === '/api/v2/globe/races/race-key') return send(200, { race });
     if (req.url === '/api/v2/globe/boats/boat-key/profile') return send(200, { boat: currentBoat, races: { active: [race], past: [] }, ...boatSnapshot });
     if (req.url === '/api/v3/globe_boats') return send(200, { boats: [currentBoat] });
     if (req.url.startsWith('/api/v3/globe_boats/boat-key/history?')) {
@@ -96,6 +100,9 @@ before(async () => {
       return send(200, { uuid: 'boat-key', type: query.get('type'), ...boatSnapshot.history?.[query.get('cursor') ?? 'first'] });
     }
     if (req.url === '/api/v3/globe_boats?include=weather') return send(200, { boats: [{ ...currentBoat, weather_now: boatSnapshot.weather_now ?? null }], weather_units: { wind_speed_10m: 'kn' } });
+    if (req.url === '/api/v3/globe_boats/followed') return send(200, { boats: [followedBoat] });
+    if (req.url === '/api/v3/globe_boats/private-boat/follow') return send(422, { error: 'This owner’s boats are private. Use the owner’s invite link on the website to follow it.' });
+    if (req.url === '/api/v3/globe_boats/boat-key/follow') return send(200, { boat: { uuid: 'boat-key', name: 'Boat', is_followed: req.method === 'POST', id: 999 } });
     if (req.url === '/api/v3/globe_boats/boat-key') {
       if (req.method === 'PATCH') {
         Object.assign(currentBoat, JSON.parse(body).boat);
@@ -556,6 +563,26 @@ test('leaderboard preserves server rank and penalty', async () => {
   assert.equal(result.data.entries[0].position, 1);
   assert.equal(result.data.entries[0].penaltySeconds, 30);
 });
+test('race show and leaderboard read one leaderboard page and return its pagination', async () => {
+  for (const command of ['show', 'leaderboard']) {
+    const first = await cli('--json', 'globe', 'races', command, 'race-key');
+    assert.equal(first.code, 0, first.stdout);
+    assert.equal(requests.at(-1).path, '/api/v2/globe/races/race-key');
+    assert.deepEqual(first.json().data.entries_pagination, { current_page: 1, per_page: 25, total_entries: 1, total_pages: 1 });
+    assert.equal((await cli('--json', 'globe', 'races', command, 'race-key', '--page', '2')).code, 0);
+    assert.equal(requests.at(-1).path, '/api/v2/globe/races/race-key?page=2');
+    assert.match((await cli('globe', 'races', command, 'race-key')).stdout, /Page 1 of 1 · 1 results\n$/);
+  }
+  requests = [];
+  for (const page of ['0', '1.5', '10001', 'two']) {
+    for (const command of ['show', 'leaderboard']) {
+      const result = await cli('globe', 'races', command, 'race-key', '--page', page);
+      assert.equal(result.code, 2, page);
+      assert.match(result.stderr, /--page must be an integer from 1 to 10000/);
+    }
+  }
+  assert.equal(requests.length, 0);
+});
 test('race JSON keeps origin, destination, course and each entry next feature', async () => {
   const plain = (await cli('--json', 'globe', 'races', 'show', 'race-key')).json().data;
   assert.deepEqual([plain.origin, plain.destination, plain.course, plain.entries[0].nextFeature], [null, null, null, null]);
@@ -800,6 +827,55 @@ test('authenticated list, heading and rename read back saved state', async () =>
   const rename = await cli('--json', 'globe', 'boats', 'rename', 'boat-key', '--name', 'New Boat');
   assert.equal(rename.json().data.boat.name, 'New Boat');
   assert.ok(requests.every(r => r.authorization === 'Bearer access-0'));
+});
+test('followed boats list, follow and unfollow use normal login, are not retried, and surface server refusals', async () => {
+  await signedIn();
+  const listed = await cli('--json', 'globe', 'boats', 'list', '--followed');
+  assert.equal(listed.code, 0, listed.stdout);
+  assert.deepEqual(requests.map(r => [r.method, r.path, r.authorization]), [['GET', '/api/v3/globe_boats/followed', 'Bearer access-0']]);
+  const { id, owner, ...fields } = followedBoat;
+  assert.deepEqual(listed.json().data.boats, [{ ...fields, owner: { name: 'Skipper Sam', country_code: 'NZ' }, mainsail_hoist: null, jib_hoist: null }]);
+  assert.doesNotMatch(listed.stdout, /"id"/);
+  const table = await cli('globe', 'boats', 'list', '--followed', '--columns', 'name,owner,latitude,longitude,update-age');
+  assert.equal(table.stdout, 'NAME        OWNER        LATITUDE (°)  LONGITUDE (°)  UPDATED (s ago)\nSea Breeze  Skipper Sam  -36.84000     174.76000      600\n');
+  for (const [command, method, followed, text] of [['follow', 'POST', true, 'Following Boat (boat-key).'], ['unfollow', 'DELETE', false, 'Stopped following Boat (boat-key).']]) {
+    requests = [];
+    const result = await cli('--json', 'globe', 'boats', command, 'boat-key');
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(result.json().data, { boat: { uuid: 'boat-key', name: 'Boat', is_followed: followed } });
+    assert.deepEqual(requests.map(r => [r.method, r.path, r.authorization]), [[method, '/api/v3/globe_boats/boat-key/follow', 'Bearer access-0']]);
+    assert.equal((await cli('globe', 'boats', command, 'boat-key')).stdout, `${text}\n`);
+    failure = 503;
+    requests = [];
+    assert.equal((await cli('globe', 'boats', command, 'boat-key')).code, 7);
+    assert.equal(requests.length, 1);
+    failure = undefined;
+  }
+  const refused = await cli('--json', 'globe', 'boats', 'follow', 'private-boat');
+  assert.equal(refused.code, 6);
+  assert.equal(refused.json().error.code, 'VALIDATION_ERROR');
+  assert.match(refused.json().error.message, /invite link on the website/);
+  assert.match((await cli('globe', 'boats', 'follow', 'private-boat')).stderr, /^VALIDATION_ERROR: .*invite link on the website/);
+});
+test('boats list needs exactly one of --mine or --followed, and follow commands need login with boat permissions', async () => {
+  await signedIn();
+  for (const args of [[], ['--mine', '--followed']]) {
+    const result = await cli('globe', 'boats', 'list', ...args);
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /Choose either --mine or --followed/);
+  }
+  for (const args of [['follow', '../boat'], ['unfollow', 'boat?x=1']]) assert.equal((await cli('globe', 'boats', ...args)).code, 2);
+  assert.equal(requests.length, 0);
+  await signedIn(false, ['public']);
+  for (const args of [['list', '--followed'], ['follow', 'boat-key'], ['unfollow', 'boat-key']]) {
+    const result = await cli('--json', 'globe', 'boats', ...args);
+    assert.equal(result.code, 3);
+    assert.equal(result.json().error.code, 'AUTH_REQUIRED');
+    assert.match(result.json().error.message, /marineverse login again/);
+  }
+  await new Auth(environment).credentials.remove();
+  for (const args of [['list', '--followed'], ['follow', 'boat-key'], ['unfollow', 'boat-key']]) assert.equal((await cli('globe', 'boats', ...args)).code, 3);
+  assert.equal(requests.length, 0);
 });
 test('concurrent expired sessions refresh once and persist rotation securely', async () => {
   const auth = await signedIn(true);

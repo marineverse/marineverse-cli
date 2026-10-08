@@ -147,10 +147,13 @@ export class MarineVerseClient {
     return { registration_open: array(result.registration_open_races).map(raceSummary), active: array(result.active_races).map(raceSummary),
       finished: array(result.finished_races).map(raceSummary), finished_limit: 10 };
   }
-  async race(key: string): Promise<Record<string, any>> {
-    const result = object(await this.publicGet(`/races/${identifier(key)}`));
+  // One leaderboard page of 25 entries; each entry keeps its absolute position in the race.
+  async race(key: string, page?: number): Promise<Record<string, any>> {
+    if (page !== undefined && (!Number.isInteger(page) || page < 1 || page > 10000)) usage('--page must be an integer from 1 to 10000.');
+    const result = object(await this.publicGet(`/races/${identifier(key)}${page === undefined ? '' : `?page=${page}`}`));
     const race = object(result.race);
-    return { ...raceSummary(race), ...pick(race, ['description', 'publishedAt']), ...raceCourse(race), entries: array(race.entries).map(entry) };
+    return { ...raceSummary(race), ...pick(race, ['description', 'publishedAt']), ...raceCourse(race), entries: array(race.entries).map(entry),
+      entries_pagination: pick(race.entriesPagination, ['current_page', 'per_page', 'total_entries', 'total_pages']) };
   }
   // Deliberate allowlist of public profile sections. Logs, tracks, crew members and owner-only
   // controls (applications, invite links) are never passed through.
@@ -172,6 +175,16 @@ export class MarineVerseClient {
   async boats(weather = false) {
     const result = object(await this.auth.get(`/api/v3/globe_boats${weather ? '?include=weather' : ''}`));
     return { boats: array(result.boats).map(boat), ...pick(result, ['weather_units']) };
+  }
+  // Your active followed boats, newest activity first (at most 100).
+  async followedBoats() {
+    const result = object(await this.auth.get('/api/v3/globe_boats/followed', 'globe_read'));
+    return { boats: array(result.boats).map(value => ({ ...boat(value), owner: pick(value.owner, ['name', 'country_code']), ...pick(value, ['approved', 'profile_url']) })) };
+  }
+  // The server refuses your own boats and boats of private owners (followed through the owner's invite link on the website).
+  async followBoat(uuid: string, remove: boolean) {
+    const result = object(await this.auth.write(remove ? 'DELETE' : 'POST', `/api/v3/globe_boats/${identifier(uuid)}/follow`, {}, 'globe_write'));
+    return { boat: pick(result.boat, ['uuid', 'name', 'is_followed']) };
   }
   // One read returns current state, forecast arrays, an interpolated "now" estimate, units and the latest port call.
   async showBoat(uuid: string) {

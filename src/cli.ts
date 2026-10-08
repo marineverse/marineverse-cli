@@ -311,17 +311,21 @@ function registerFeatureCommands(program: Command, services: Services): void {
   const races = globe.command('races').description('Public races; no login needed');
   browserCommand(races, 'open [race-key]', 'Open a race or the race list on the website', key => key ? `/globe/races/${key}` : '/globe/races');
   tableCommand(races.command('list'), 'races').description('Registration-open, active, and latest ten finished races').action(execute(client => client.races()));
-  tableCommand(races.command('show <race-key>'), 'leaderboard').description('Race details and leaderboard').action((key, opts, command) => invoke(command, client => client.race(key)));
-  tableCommand(races.command('leaderboard <race-key>'), 'leaderboard').description('Server-ranked leaderboard including time penalties')
-    .action((key, opts, command) => invoke(command, async client => { const race = await client.race(key); return { publicKey: race.publicKey, name: race.name, entries: race.entries }; }));
+  tableCommand(races.command('show <race-key>'), 'leaderboard').description('Race details and leaderboard').option('--page <number>', 'Read a leaderboard page (default 1)')
+    .action((key, opts, command) => invoke(command, client => client.race(key, opts.page === undefined ? undefined : Number(opts.page))));
+  tableCommand(races.command('leaderboard <race-key>'), 'leaderboard').description('Server-ranked leaderboard including time penalties').option('--page <number>', 'Read a leaderboard page (default 1)')
+    .action((key, opts, command) => invoke(command, async client => { const race = await client.race(key, opts.page === undefined ? undefined : Number(opts.page)); return { publicKey: race.publicKey, name: race.name, entries: race.entries, entries_pagination: race.entries_pagination }; }));
   const boats = globe.command('boats').description('Public profiles and authenticated boat controls');
   browserCommand(boats, 'open <boat-uuid>', 'Open a public boat profile on the website', key => `/globe/boats-profiles/${key}`);
   browserCommand(boats, 'view-3d <boat-uuid>', 'Open the boat’s 3D view on the website', key => `/globe/boats-profiles/${key}/3d`);
   tableCommand(boats.command('profile <boat-uuid>'), 'boats').description('View a public boat profile without login').action((uuid, opts, command) => invoke(command, client => client.profile(uuid)));
   // Weather is fetched only when a weather column is requested.
-  tableCommand(boats.command('list'), 'boats').requiredOption('--mine', 'List boats you own or crew')
-    .action((opts, command) => invoke(command, client => client.boats(
-      String(opts.columns ?? '').split(',').some(column => ['wind', 'wind-dir', 'current', 'wave'].includes(column.trim())))));
+  tableCommand(boats.command('list'), 'boats').option('--mine', 'List boats you own or crew').option('--followed', 'List active boats you follow, newest activity first (up to 100)')
+    .action((opts, command) => {
+      if (!opts.mine === !opts.followed) usage('Choose either --mine or --followed.');
+      return invoke(command, client => opts.followed ? client.followedBoats() : client.boats(
+        String(opts.columns ?? '').split(',').some(column => ['wind', 'wind-dir', 'current', 'wave'].includes(column.trim()))));
+    });
   tableCommand(boats.command('show <boat-uuid>'), 'boats').description('Read one of your owned/crewed boats').action((uuid, opts, command) => invoke(command, client => client.showBoat(uuid)));
   boats.command('history <boat-uuid>').description('Recorded logs, port calls, or passages of your boat, newest first (one type per request)')
     .addOption(new Option('--type <type>', 'History to read').choices(['logs', 'port-calls', 'passages']).default('logs'))
@@ -363,6 +367,10 @@ function registerFeatureCommands(program: Command, services: Services): void {
       if (!/^[A-Za-z0-9' ]{2,100}$/.test(name)) usage('Name must be 2–100 letters, numbers, spaces, or apostrophes.');
       return invoke(command, client => client.updateBoat(uuid, { name }));
     });
+  for (const [name, remove] of [['follow', false], ['unfollow', true]] as const) {
+    boats.command(`${name} <boat-uuid>`).description(remove ? 'Stop following a boat' : 'Follow a public boat (private boats: use the owner’s invite link on the website)')
+      .action((uuid, _opts, command) => invoke(command, client => client.followBoat(uuid, remove)));
+  }
   for (const group of [program, config, auth, discord, profile, progress, stats, skills, globe, races, boats, kb, ai, content, terms, sailingClub, clubs, feedback, feedbackBoards, feedbackPosts, feedbackComments]) {
     group.action(() => { group.outputHelp(); });
     group.helpCommand(true);
