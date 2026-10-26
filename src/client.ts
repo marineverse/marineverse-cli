@@ -6,6 +6,7 @@ import { FeedbackClient } from './feedback.js';
 import { ContentClient } from './content.js';
 import { ClubsClient } from './clubs.js';
 import { RacingClient } from './racing.js';
+import { parseBoatRequest, sendBoatCommand, sendBoatEnvelope, type BoatCommand, type BoatCommandValues } from './globe.js';
 
 function object(value: any): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CliError('INVALID_RESPONSE', 'Unexpected API response structure.');
@@ -25,7 +26,8 @@ function identifier(value: string): string {
 }
 export function boat(value: any) {
   const data = pick(value, ['uuid', 'name', 'heading', 'location_name', 'latitude', 'longitude', 'p_lat', 'p_lng', 'last_speed_kts', 'last_speed_in_kts', 'mainsail_hoist', 'jib_hoist', 'is_anchored', 'is_owner', 'is_crew',
-    'awa', 'time_since_last_update_seconds', 'in_port', 'crew_role', 'weather_now']);
+    'awa', 'time_since_last_update_seconds', 'in_port', 'crew_role', 'weather_now', 'anchor',
+    'state_version', 'target_heading', 'mainsheet', 'jibsheet', 'last_simulation_update', 'velocity_east_mps', 'velocity_north_mps', 'yaw_rate_rad_s']);
   if (typeof data.uuid !== 'string') throw new CliError('INVALID_RESPONSE', 'Boat response is missing its UUID.');
   data.latitude = data.latitude ?? data.p_lat ?? null;
   data.longitude = data.longitude ?? data.p_lng ?? null;
@@ -187,8 +189,8 @@ export class MarineVerseClient {
     return { boat: pick(result.boat, ['uuid', 'name', 'is_followed']) };
   }
   // One read returns current state, forecast arrays, an interpolated "now" estimate, units and the latest port call.
-  async showBoat(uuid: string) {
-    const result = object(await this.auth.get(`/api/v3/globe_boats/${identifier(uuid)}`));
+  async showBoat(uuid: string, { anchorPreview = false } = {}) {
+    const result = object(await this.auth.get(`/api/v3/globe_boats/${identifier(uuid)}${anchorPreview ? '?anchor_preview=1' : ''}`, 'globe_read'));
     return { boat: boat(result.boat), ...pick(result, ['weather', 'weather_now', 'weather_units', 'last_port_call']) };
   }
   // One bounded, newest-first page of one history type, fetched only on request.
@@ -209,17 +211,31 @@ export class MarineVerseClient {
       ...pick(result, ['oldest_available_at']) };
   }
   async updateBoat(uuid: string, change: { heading?: number; name?: string; mainsail_hoist?: number; jib_hoist?: number }) {
+    if (change.name === undefined) {
+      const values: BoatCommandValues = {};
+      if (change.heading !== undefined) values.heading = change.heading;
+      if (change.mainsail_hoist !== undefined) values.mainsail_hoist_level = change.mainsail_hoist;
+      if (change.jib_hoist !== undefined) values.jib_hoist_level = change.jib_hoist;
+      return this.commandBoat(uuid, 'boat_set_controls', values);
+    }
+    if (Object.keys(change).some(key => key !== 'name')) usage('Rename separately from heading or sail changes.');
     const path = `/api/v3/globe_boats/${identifier(uuid)}`;
-    const accepted = boat((await request(`${this.environment.apiUrl}${path}`, { method: 'PATCH',
-      headers: { Authorization: `Bearer ${await this.auth.accessToken()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ boat: change }) })).boat);
+    const accepted = boat((await this.auth.write('PATCH', path, { boat: change }, 'globe_write')).boat);
     try {
-      const verified = await this.showBoat(uuid);
+      const verified = await this.showBoat(uuid, { anchorPreview: false });
       const matches = Object.entries(change).every(([key, value]) => verified.boat[key] === value);
       return { ...verified, requested_change: change, update_accepted: true, verified: matches,
         ...(!matches ? { warning: 'The saved state differs from the request. Simulation or another controller may have adjusted it; anchored boats turn with the wind.' } : {}) };
     } catch {
       return { boat: accepted, requested_change: change, update_accepted: true, verified: false, warning: 'Update accepted, but readback failed. Check boat state before retrying.' };
     }
+  }
+  async commandBoat(uuid: string, command: BoatCommand, values: BoatCommandValues = {}) {
+    const path = `/api/v3/globe_boats/${identifier(uuid)}`;
+    const current = await this.showBoat(uuid, { anchorPreview: false });
+    return sendBoatCommand(this.auth, path, command, values, current.boat, boat);
+  }
+  async retryBoatCommand(uuid: string, request: string) {
+    return sendBoatEnvelope(this.auth, `/api/v3/globe_boats/${identifier(uuid)}`, parseBoatRequest(request), boat);
   }
 }

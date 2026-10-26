@@ -1,6 +1,6 @@
 import { Auth } from './auth.js';
 import { CliError, usage } from './errors.js';
-import { request } from './http.js';
+import { request, REQUEST_TIMEOUT_MS } from './http.js';
 
 export const feedbackFilters = ['all', 'open', 'under_review', 'planned', 'in_progress', 'complete', 'mine', 'upvoted_by_me'];
 export const roadmapFilters = ['all', 'mine', 'upvoted_by_me'];
@@ -45,7 +45,7 @@ export class FeedbackClient {
     // rejected session or send credentials belonging to another API environment.
     const signedIn = this.auth.environment.clientId && await this.auth.credentials.read();
     return result(signedIn || personalized ? await this.auth.get(endpoint, 'feedback_read', retryReads)
-      : await request(`${this.auth.environment.apiUrl}${endpoint}`, {}, 15_000, retryReads));
+      : await request(`${this.auth.environment.apiUrl}${endpoint}`, {}, REQUEST_TIMEOUT_MS, retryReads));
   }
 
   private async write(method: 'POST' | 'PATCH' | 'DELETE', path: string, body: unknown = {}) {

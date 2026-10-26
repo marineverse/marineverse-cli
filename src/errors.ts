@@ -8,6 +8,9 @@ export type RequestDiagnostics = {
 };
 
 export class CliError extends Error {
+  // Response bodies are internal; each feature must explicitly select safe public details.
+  responseBody?: unknown;
+  details?: Record<string, unknown>;
   constructor(public code: string, message: string, public exitCode = 7, public retryAfterSeconds?: number, public oauthError?: string,
     public diagnostics?: RequestDiagnostics) {
     super(message);

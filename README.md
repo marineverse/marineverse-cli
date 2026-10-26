@@ -403,7 +403,7 @@ For device login, open the printed URL on any device, sign in, check that the co
 
 `--no-browser` prevents opening a browser; it does not select the login method. Scripts and `--json` never prompt, so pass `--device-auth` for remote login. The CLI never asks for your MarineVerse password.
 
-Heading and sail changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
+Heading and anchor changes require boat-control permission; sail-trim crew can change sails and sheets. Login alone does not grant control. Inspect the returned permissions. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Rename is read back (`update_accepted` and `verified`). Other controls return the server's command receipt and state; acceptance does not prove a running game client executed the change.
 
 `boats list --followed` lists the active boats you follow, newest activity first (up to 100). JSON includes each boat's `owner`, `approved`, and `profile_url`; add `--columns name,owner,latitude,longitude,update-age` to show the owner in the table. `boats list` takes exactly one of `--mine` or `--followed`. `follow` and `unfollow` take a boat UUID from command output, such as a leaderboard. Only public boats can be followed from the CLI; to follow a private owner's boat, use the owner's invite link on the website. You cannot follow your own boats.
 
@@ -414,10 +414,22 @@ marineverse globe boats raise-sails BOAT_UUID
 marineverse globe boats set-sails BOAT_UUID --main 0.75 --jib 0.5
 marineverse globe boats lower-sails BOAT_UUID
 marineverse globe boats drop-anchor BOAT_UUID
-marineverse globe boats show BOAT_UUID --columns name,latitude,longitude,main,jib,anchored
+marineverse globe boats secure-anchor BOAT_UUID --recommended
+marineverse globe boats set-rode BOAT_UUID --meters 40
+marineverse globe boats retrieve-anchor BOAT_UUID
+marineverse globe boats set-sheets BOAT_UUID --main 0.4 --jib 0.5
+marineverse globe boats show BOAT_UUID --json
 ```
 
-Sail levels range from `0` (fully lowered) to `1` (fully raised). `set-sails` changes only the sails you specify. In Globe, both sails below `0.05` means anchored: `drop-anchor` and `lower-sails` set both to zero. `raise-sails` sets both to one and resumes sailing. There is no separate anchor toggle. Commands send one update, then read back the result; `--json` includes the requested change and verification status.
+Sail levels range from `0` (fully lowered) to `1` (fully raised). Sheet levels range from `0` (in) to `1` (eased). Omitted sails/sheets keep their settings. Lowering sails does not drop the physical anchor, and raising sails does not retrieve it. A boat still using the old sail-based hold is explicitly labelled `legacy_hold`.
+
+Offline stowed boats with both sails down retain the ordinary parked position and wind-vane heading behavior, including in port. Active attachments use the anchor simulation and its existing port/collision assist. Lowering sails does not deploy an anchor; there is no separate “Start drifting” action.
+
+Use `show BOAT_UUID --check-anchor` for current anchoring availability and the reason when unavailable; ordinary `show` returns saved state without calculating depth or clearance. `drop-anchor` starts lowering; bottom contact must occur before the anchor attaches. `secure-anchor --recommended` pays out sufficient rode and secures it when ready. `set-rode` accepts either `--meters` or `--recommended`. Retrieval may require approaching the anchor and reducing its load first. These operations take time: inspect `anchor.state`, `bottom_contact`, `rode_m`, `target_rode_m`, and `secured` rather than assuming receipt acceptance means completion. Depth is simulated, not navigation-grade bathymetry.
+
+Boat JSON also retains `anchor.eligibility`, permissions, target heading, sheet settings, motion vectors, and saved-state timestamps. Human output summarizes these; optional columns include `anchor,rode,target-rode,control,trim-sails`. CLI reads are saved REST snapshots. Open `view-3d` for the website's live view when a game client is connected; browsers never become the physics master.
+
+Use `--json` for control commands to retain their request and receipt. After an uncertain result, inspect the boat before doing anything else. To resolve that same command, pass its unchanged `request` object to `globe boats retry-command BOAT_UUID --request 'JSON_REQUEST' --json` within the server's retry window (15 minutes). Error results put it at `error.details.request`. Do not edit the object or replay a stale-revision rejection as a new command without checking the current state and intended change. Boat commands are not automatically retried and retain the ordinary 30-second network deadline. Controls require the updated backend; there is no fallback to legacy sail-based anchoring.
 
 `marineverse login` is also available as a shortcut for `marineverse auth login`, with the same options.
 
@@ -450,7 +462,7 @@ Configuration precedence is command flags, `MARINEVERSE_ENV` / `MARINEVERSE_API_
 
 Every API request, including OAuth, identifies itself with `User-Agent: marineverse-cli/<version>`, `X-MarineVerse-Client: marineverse-cli`, and `X-MarineVerse-Client-Version: <version>`, using the installed CLI version. These are diagnostic labels, not authentication; servers must not trust them for authorization.
 
-Ordinary requests allow 15 seconds per attempt. GET requests retry at most twice for transient connection failures, timeouts, and HTTP 429/502/503/504, with a shared 30-second request budget including backoff and any token refresh. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Mutations and token exchanges are never automatically replayed. Check state after an ambiguous mutation failure before retrying. Optional `error.diagnostics` includes a sanitized cause, request stage, elapsed milliseconds, attempt count, and a request ID when available; share these when reporting a failure. Requests do not poll in the background or follow redirects. Only login (`login` or `auth login`), explicit `open` / `view-3d` commands, and racing `compare --open` can launch a browser; `--no-browser` suppresses launching. Concurrent token refresh is serialized per credential.
+Ordinary requests allow 30 seconds per attempt. GET requests retry at most twice for transient connection failures, timeouts, and HTTP 429/502/503/504, within a shared 30-second request budget including backoff and any token refresh. A request that uses the whole budget is not retried. `Retry-After` is a minimum wait; waits above five seconds stop automatic retries and are exposed as `error.retry_after_seconds`. Mutations and token exchanges are never automatically replayed after an uncertain result. Check state after an ambiguous mutation failure before retrying. Optional `error.diagnostics` includes a sanitized cause, request stage, elapsed milliseconds, attempt count, and a request ID when available; share these when reporting a failure. Requests do not poll in the background or follow redirects. Only login (`login` or `auth login`), explicit `open` / `view-3d` commands, and racing `compare --open` can launch a browser; `--no-browser` suppresses launching. Concurrent token refresh is serialized per credential.
 
 ## Development and release checks
 

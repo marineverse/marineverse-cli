@@ -3,7 +3,7 @@ import { randomInt } from 'node:crypto';
 import { CliError, type RequestDiagnostics } from './errors.js';
 import { CLIENT_NAME, VERSION } from './version.js';
 
-export const REQUEST_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
 export const READ_DEADLINE_MS = 30_000;
 
 // Retries and an authenticated read's token refresh consume the same deadline.
@@ -106,8 +106,10 @@ export async function request(url: string, options: RequestInit = {}, timeoutMs 
         const [code, exit] = codes[response.status] || ['API_ERROR', 7];
         const detail = Array.isArray(body?.errors) ? body.errors.join('; ') : body?.error_description || body?.error;
         const message = typeof detail === 'string' ? detail : `API returned HTTP ${response.status}.`;
-        throw new CliError(code, `${message}${retryAfter !== undefined ? ` Retry after ${retryAfter} seconds.` : ''}`, exit, retryAfter,
+        const error = new CliError(code, `${message}${retryAfter !== undefined ? ` Retry after ${retryAfter} seconds.` : ''}`, exit, retryAfter,
           typeof body?.error === 'string' ? body.error : undefined, diagnostics(`HTTP_${response.status}`));
+        error.responseBody = body;
+        throw error;
       }
       return body;
     } catch (error) {
