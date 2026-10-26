@@ -103,14 +103,11 @@ before(async () => {
     if (req.url === '/api/v3/globe_boats/followed') return send(200, { boats: [followedBoat] });
     if (req.url === '/api/v3/globe_boats/private-boat/follow') return send(422, { error: 'This owner’s boats are private. Use the owner’s invite link on the website to follow it.' });
     if (req.url === '/api/v3/globe_boats/boat-key/follow') return send(200, { boat: { uuid: 'boat-key', name: 'Boat', is_followed: req.method === 'POST', id: 999 } });
-    if (req.url === '/api/v3/globe_boats/boat-key/commands') {
-      const input = JSON.parse(body);
-      for (const [field, target] of [['heading', 'heading'], ['mainsail_hoist_level', 'mainsail_hoist'], ['jib_hoist_level', 'jib_hoist']]) {
-        if (input[field] !== undefined) currentBoat[target] = input[field];
-      }
-      if (input.command === 'anchor_drop') currentBoat.anchor.state = 'deploying';
-      currentBoat.anchor.revision++;
-      return send(200, { command_id: input.command_id, applied: true, reason: 'applied', boat: currentBoat, retry_horizon_seconds: 900 });
+    if (req.url === '/api/v3/globe_boats/boat-key/anchor') {
+      const rode_m = JSON.parse(body).rode_m;
+      if (rode_m === 0) currentBoat.anchor = null;
+      else currentBoat.anchor = { latitude: 1, longitude: 2, depth_m: 4.25, ...currentBoat.anchor, rode_m };
+      return send(200, { boat: currentBoat });
     }
     if (req.url === '/api/v3/globe_boats/boat-key') {
       if (req.method === 'PATCH') {
@@ -128,8 +125,7 @@ before(async () => {
   environment = await setEnvironment('test', origin, origin, 'test-client');
 });
 beforeEach(() => {
-  requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, mainsail_hoist: 1, jib_hoist: 0.6, is_anchored: false, id: 999,
-    anchor: { control_protocol: 1, revision: 0, state: 'stowed', can_control: true, can_trim_sails: true } }; refreshCount = 0; failRead = false; failure = undefined;
+  requests = []; currentBoat = { uuid: 'boat-key', name: 'Boat', heading: 90, mainsail_hoist: 1, jib_hoist: 0.6, is_anchored: false, id: 999 }; refreshCount = 0; failRead = false; failure = undefined;
   deviceStart = undefined; devicePolls = []; revokeStatuses = []; boatSnapshot = {};
   sailingData = { uuid: 'user-key', display_name: 'Test Sailor', id: 42, next_step: 'Try a race', finished_race: false,
     boat_stats: { yacht: { total_distance_nm: 12.34567, total_time_minutes: '90.12345', id: 99 }, dinghy: { total_distance_nm: 0, total_time_minutes: 0 } },
@@ -779,7 +775,7 @@ test('JSON errors use nonzero codes without contaminating stdout', async () => {
   assert.equal(missing.code, 5);
   assert.equal(missing.json().error.code, 'NOT_FOUND');
 });
-test('sail controls use revisioned commands and preserve omitted sails without operating the anchor', async () => {
+test('sail controls send one authenticated patch, preserve omitted sails, and verify readback', async () => {
   await signedIn();
   for (const [args, expected] of [
     [['set-sails', 'boat-key', '--main', '0.37'], { mainsail_hoist: 0.37 }],
@@ -787,26 +783,21 @@ test('sail controls use revisioned commands and preserve omitted sails without o
     [['set-sails', 'boat-key', '--main', '0.5', '--jib', '0.75'], { mainsail_hoist: 0.5, jib_hoist: 0.75 }],
     [['lower-sails', 'boat-key'], { mainsail_hoist: 0, jib_hoist: 0 }],
     [['raise-sails', 'boat-key'], { mainsail_hoist: 1, jib_hoist: 1 }],
+    [['lower-sails', 'boat-key'], { mainsail_hoist: 0, jib_hoist: 0 }],
   ]) {
     const before = { ...currentBoat };
     requests = [];
     const result = await cli('globe', 'boats', ...args, '--json');
     assert.equal(result.code, 0, result.stdout);
-    assert.deepEqual(requests.map(r => r.method), ['GET', 'POST']);
-    const { command_id, issued_at, expected_revision, ...intent } = JSON.parse(requests[1].body);
-    assert.match(command_id, /^[a-f0-9-]{36}$/);
-    assert.ok(Number.isFinite(Date.parse(issued_at)));
-    assert.equal(typeof expected_revision, 'number');
-    assert.deepEqual(intent, { command: 'boat_set_controls', ...Object.fromEntries(Object.entries(expected).map(([key, value]) => [`${key}_level`, value])) });
+    assert.deepEqual(requests.map(r => r.method), ['PATCH', 'GET']);
+    assert.deepEqual(JSON.parse(requests[0].body), { boat: expected });
     assert.ok(requests.every(r => r.authorization === 'Bearer access-0'));
-    assert.equal(result.json().data.applied, true);
-    assert.equal(result.json().data.verified, undefined);
-    assert.equal(result.json().data.boat.anchor.state, 'stowed');
+    assert.equal(result.json().data.verified, true);
     for (const field of ['mainsail_hoist', 'jib_hoist']) assert.equal(result.json().data.boat[field], expected[field] ?? before[field]);
   }
   const table = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,main,jib,anchored');
   assert.match(table.stdout, /MAIN\s+JIB\s+ANCHORED/);
-  assert.match(table.stdout, /Boat\s+1\s+1\s+false/);
+  assert.match(table.stdout, /Boat\s+0\s+0\s+true/);
   const publicBoat = boat({ uuid: 'boat-key', mainsail_hoist_level: 0.2, jib_hoist_level: 0, is_anchored: false });
   assert.equal(publicBoat.mainsail_hoist, 0.2);
   assert.equal(publicBoat.jib_hoist, 0);
@@ -820,22 +811,58 @@ test('invalid sail levels fail before any request, and denied writes are not ret
   }
   assert.equal(requests.length, 0);
   failure = 403;
-  assert.equal((await cli('globe', 'boats', 'drop-anchor', 'boat-key')).code, 4);
-  assert.deepEqual(requests.map(r => r.method), ['GET']);
+  assert.equal((await cli('globe', 'boats', 'lower-sails', 'boat-key')).code, 4);
+  assert.deepEqual(requests.map(r => r.method), ['PATCH']);
 });
-test('a failed control preflight never submits a new command', async () => {
+// Added by AI - Main use case: anchor commands send one chain length and show the anchor the server saved.
+test('anchor commands send the chain out and show the saved anchor', async () => {
+  await signedIn();
+  for (const [args, rode_m] of [
+    [['drop-anchor', 'boat-key'], 5],
+    [['set-rode', 'boat-key', '--meters', '30'], 30],
+    [['set-rode', 'boat-key', '--meters', '12.5'], 12.5],
+  ]) {
+    requests = [];
+    const result = await cli('globe', 'boats', ...args, '--json');
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(requests.map(r => [r.method, r.path]), [['POST', '/api/v3/globe_boats/boat-key/anchor']]);
+    assert.deepEqual(JSON.parse(requests[0].body), { rode_m });
+    assert.ok(requests.every(r => r.authorization === 'Bearer access-0'));
+    assert.deepEqual(result.json().data.boat.anchor, { latitude: 1, longitude: 2, depth_m: 4.25, rode_m });
+  }
+  const table = await cli('globe', 'boats', 'set-rode', 'boat-key', '--meters', '20', '--columns', 'name,rode,depth');
+  assert.match(table.stdout, /RODE \(m\)\s+DEPTH \(m\)/);
+  assert.match(table.stdout, /Boat\s+20\s+4\.3/);
+  const lifted = await cli('globe', 'boats', 'retrieve-anchor', 'boat-key', '--json');
+  assert.deepEqual(JSON.parse(requests.at(-1).body), { rode_m: 0 });
+  assert.equal(lifted.json().data.boat.anchor, null);
+});
+// Added by AI - Edge case: chain lengths outside 1–60 m are refused before any request.
+test('invalid chain lengths fail before any request', async () => {
+  await signedIn();
+  requests = [];
+  for (const args of [['set-rode', 'boat-key', '--meters', '0'], ['set-rode', 'boat-key', '--meters', '61'], ['set-rode', 'boat-key', '--meters', 'junk'],
+    ['set-rode', 'boat-key', '--meters', ' '], ['set-rode', 'boat-key'], ['drop-anchor', 'boat-key', '--rode', '0']]) {
+    assert.equal((await cli('globe', 'boats', ...args, '--json')).code, 2, args.join(' '));
+  }
+  assert.equal(requests.length, 0);
+});
+test('sail readback failures remain distinct from a rejected write', async () => {
   await signedIn();
   failRead = true;
-  const result = await cli('globe', 'boats', 'drop-anchor', 'boat-key', '--json');
-  assert.equal(result.code, 7);
-  assert.equal(requests.filter(r => r.method === 'POST').length, 0);
+  const result = await cli('globe', 'boats', 'lower-sails', 'boat-key', '--json');
+  assert.equal(result.code, 0);
+  assert.equal(result.json().data.update_accepted, true);
+  assert.equal(result.json().data.verified, false);
+  assert.match(result.json().data.warning, /readback failed/);
+  assert.equal(requests.filter(r => r.method === 'PATCH').length, 1);
 });
 test('authenticated list, heading and rename read back saved state', async () => {
   await signedIn();
   assert.equal((await cli('--json', 'globe', 'boats', 'list', '--mine')).code, 0);
   const heading = await cli('--json', 'globe', 'boats', 'set-heading', 'boat-key', '--degrees', '360');
   assert.equal(heading.json().data.boat.heading, 0);
-  assert.equal(heading.json().data.applied, true);
+  assert.equal(heading.json().data.verified, true);
   const rename = await cli('--json', 'globe', 'boats', 'rename', 'boat-key', '--name', 'New Boat');
   assert.equal(rename.json().data.boat.name, 'New Boat');
   assert.ok(requests.every(r => r.authorization === 'Bearer access-0'));
@@ -920,13 +947,13 @@ test('non-JSON HTTP failures retain permission and rate-limit semantics', async 
 });
 test('mutations are never retried after a server failure', async () => {
   await signedIn(); failure = 503;
-  const result = await cli('--json', 'globe', 'boats', 'rename', 'boat-key', '--name', 'New Boat');
+  const result = await cli('--json', 'globe', 'boats', 'set-heading', 'boat-key', '--degrees', '215');
   assert.equal(result.code, 7);
   assert.equal(requests.filter(r => r.method === 'PATCH').length, 1);
 });
 test('readback failure is distinguished from a rejected mutation', async () => {
   await signedIn(); failRead = true;
-  const result = await cli('--json', 'globe', 'boats', 'rename', 'boat-key', '--name', 'New Boat');
+  const result = await cli('--json', 'globe', 'boats', 'set-heading', 'boat-key', '--degrees', '215');
   assert.equal(result.json().data.update_accepted, true);
   assert.equal(result.json().data.verified, false);
   assert.equal(requests.filter(r => r.method === 'PATCH').length, 1);

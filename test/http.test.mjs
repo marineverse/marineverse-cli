@@ -47,20 +47,6 @@ test('network failure never requests token refresh and Auth.post keeps diagnosti
     && /may have completed/.test(error.message));
 });
 
-test('a Globe write shares its deadline with token refresh and does not send after it expires', async t => {
-  let now = 0, requests = 0;
-  t.mock.method(performance, 'now', () => now);
-  const auth = fixtureAuth(), budget = new RequestBudget(30_000);
-  auth.accessToken = async (_rejected, sharedBudget) => {
-    assert.equal(sharedBudget, budget);
-    now = 30_001;
-    return 'fixture-token';
-  };
-  globalThis.fetch = async () => { requests++; return Response.json({ ok: true }); };
-  await assert.rejects(auth.write('POST', '/commands', {}, 'globe_write', budget), error => error.code === 'NETWORK_ERROR');
-  assert.equal(requests, 0);
-});
-
 test('uncertain POST outcomes use accurate guidance for mutations and chargeable AI requests without replay', async () => {
   for (const path of ['/api/v3/globe/boats/fixture', '/api/v2/kb/search', '/api/v2/ai/ask']) {
     let attempts = 0;

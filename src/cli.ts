@@ -326,9 +326,7 @@ function registerFeatureCommands(program: Command, services: Services): void {
       return invoke(command, client => opts.followed ? client.followedBoats() : client.boats(
         String(opts.columns ?? '').split(',').some(column => ['wind', 'wind-dir', 'current', 'wave'].includes(column.trim()))));
     });
-  tableCommand(boats.command('show <boat-uuid>'), 'boats').description('Read one of your owned/crewed boats')
-    .option('--check-anchor', 'Check current anchor depth and clearance')
-    .action((uuid, opts, command) => invoke(command, client => client.showBoat(uuid, { anchorPreview: !!opts.checkAnchor })));
+  tableCommand(boats.command('show <boat-uuid>'), 'boats').description('Read one of your owned/crewed boats').action((uuid, opts, command) => invoke(command, client => client.showBoat(uuid)));
   boats.command('history <boat-uuid>').description('Recorded logs, port calls, or passages of your boat, newest first (one type per request)')
     .addOption(new Option('--type <type>', 'History to read').choices(['logs', 'port-calls', 'passages']).default('logs'))
     .option('--limit <count>', 'Maximum records, 1–200', '50')
@@ -342,46 +340,25 @@ function registerFeatureCommands(program: Command, services: Services): void {
       return invoke(command, client => client.updateBoat(uuid, { heading: heading % 360 }));
     });
   for (const [name, level, description] of [
-    ['raise-sails', 1, 'Fully raise both sails; a deployed anchor stays deployed'],
-    ['lower-sails', 0, 'Fully lower both sails; this does not drop the anchor'],
+    ['raise-sails', 1, 'Fully raise both sails to start sailing'],
+    ['lower-sails', 0, 'Fully lower both sails (the boat holds its position)'],
   ] as const) {
     tableCommand(boats.command(`${name} <boat-uuid>`), 'boats').description(description)
       .action((uuid, _opts, command) => invoke(command, client => client.updateBoat(uuid, { mainsail_hoist: level, jib_hoist: level })));
   }
-  for (const [name, action, description] of [
-    ['drop-anchor', 'anchor_drop', 'Start lowering the anchor; it attaches only after bottom contact'],
-    ['retrieve-anchor', 'anchor_retrieve', 'Start retrieving the anchor when speed, load, and distance permit'],
-  ] as const) {
-    tableCommand(boats.command(`${name} <boat-uuid>`), 'boats').description(description)
-      .action((uuid, _opts, command) => invoke(command, client => client.commandBoat(uuid, action)));
-  }
-  tableCommand(boats.command('set-rode <boat-uuid>'), 'boats').description('Pay out or take in anchor rode (meters)')
-    .option('--meters <number>', 'Target rode length in meters').option('--recommended', 'Use the server’s recommended rode length')
-    .action((uuid, opts, command) => {
-      if ((opts.meters !== undefined) === !!opts.recommended) usage('Choose either --meters or --recommended.');
-      const meters = Number(opts.meters);
-      if (!opts.recommended && (!opts.meters.trim() || !Number.isFinite(meters) || meters < 0)) usage('--meters must be a finite number of zero or more.');
-      return invoke(command, client => client.commandBoat(uuid, 'anchor_set_rode', opts.recommended ? { recommended: true } : { rode_m: meters }));
-    });
-  tableCommand(boats.command('secure-anchor <boat-uuid>'), 'boats').description('Secure sufficient rode for reliable holding after bottom contact')
-    .option('--recommended', 'First pay out to the server’s recommended rode length')
-    .action((uuid, opts, command) => invoke(command, client => client.commandBoat(uuid, 'anchor_secure', opts.recommended ? { recommended: true } : {})));
-  tableCommand(boats.command('set-sheets <boat-uuid>'), 'boats').description('Trim either sheet; omitted sheets keep their setting')
-    .option('--main <level>', 'Mainsheet from 0 (in) to 1 (eased)').option('--jib <level>', 'Jibsheet from 0 (in) to 1 (eased)')
-    .action((uuid, opts, command) => {
-      const values: { mainsheet?: number; jibsheet?: number } = {};
-      for (const [option, field] of [['main', 'mainsheet'], ['jib', 'jibsheet']] as const) {
-        if (opts[option] === undefined) continue;
-        const level = Number(opts[option]);
-        if (!opts[option].trim() || !Number.isFinite(level) || level < 0 || level > 1) usage(`--${option} must be a finite number between 0 and 1.`);
-        values[field] = level;
-      }
-      if (!Object.keys(values).length) usage('Specify --main and/or --jib with a level from 0 to 1.');
-      return invoke(command, client => client.commandBoat(uuid, 'boat_set_controls', values));
-    });
-  tableCommand(boats.command('retry-command <boat-uuid>'), 'boats').description('Resend an earlier command unchanged, using its JSON request object')
-    .requiredOption('--request <json>', 'Exact request object returned by the original command')
-    .action((uuid, opts, command) => invoke(command, client => client.retryBoatCommand(uuid, opts.request)));
+  const rode = (value: string, minimum: number) => {
+    const meters = Number(value);
+    if (!value.trim() || !Number.isFinite(meters) || meters < minimum || meters > 60) usage(`Chain must be a number of meters from ${minimum} to 60.`);
+    return meters;
+  };
+  tableCommand(boats.command('drop-anchor <boat-uuid>'), 'boats').description('Drop the anchor where the boat is')
+    .option('--rode <meters>', 'Chain to let out, 1–60 m', '5')
+    .action((uuid, opts, command) => invoke(command, client => client.anchorBoat(uuid, rode(opts.rode, 1))));
+  tableCommand(boats.command('set-rode <boat-uuid>'), 'boats').description('Let out or take in anchor chain; taking in pulls the boat toward the anchor')
+    .requiredOption('--meters <number>', 'Chain out, 1–60 m')
+    .action((uuid, opts, command) => invoke(command, client => client.anchorBoat(uuid, rode(opts.meters, 1))));
+  tableCommand(boats.command('retrieve-anchor <boat-uuid>'), 'boats').description('Lift the anchor')
+    .action((uuid, _opts, command) => invoke(command, client => client.anchorBoat(uuid, 0)));
   tableCommand(boats.command('set-sails <boat-uuid>'), 'boats').description('Set either sail; omitted sails keep their current level')
     .option('--main <level>', 'Mainsail hoist from 0 (lowered) to 1 (fully raised)')
     .option('--jib <level>', 'Jib hoist from 0 (lowered) to 1 (fully raised)')
@@ -438,8 +415,8 @@ export async function run(argv: string[], services: Services = defaults, applica
         ? new CliError('FILESYSTEM_ERROR', `A local file operation failed (${errno(error)}${typeof syscall === 'string' && /^[a-z]+$/.test(syscall) ? ` during ${syscall}` : ''}). Check permissions under ${configDir()}.`, 2)
         : new CliError('INTERNAL_ERROR', 'Operation failed. Check your configuration and credential store.');
     const message = application.name ? failure.message.replace(/\bmarineverse (?=login\b|auth\b)/g, `${application.name} `) : failure.message;
-    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message, retry_after_seconds: failure.retryAfterSeconds, diagnostics: failure.diagnostics, details: failure.details } })}\n`);
-    else services.stderr(`${failure.code}: ${safe(message)}${failure.diagnostics ? ` (${failure.diagnostics.cause}; ${failure.diagnostics.stage}; ${failure.diagnostics.elapsed_ms}ms; ${failure.diagnostics.attempts} attempts${failure.diagnostics.request_id ? `; request ${failure.diagnostics.request_id}` : ''})` : ''}${failure.details?.request ? `\nRequest for an exact retry (inspect boat state first): ${safe(JSON.stringify(failure.details.request))}` : ''}\n`);
+    if (argv.includes('--json')) services.stdout(`${JSON.stringify({ schema_version: 1, error: { code: failure.code, message, retry_after_seconds: failure.retryAfterSeconds, diagnostics: failure.diagnostics } })}\n`);
+    else services.stderr(`${failure.code}: ${safe(message)}${failure.diagnostics ? ` (${failure.diagnostics.cause}; ${failure.diagnostics.stage}; ${failure.diagnostics.elapsed_ms}ms; ${failure.diagnostics.attempts} attempts${failure.diagnostics.request_id ? `; request ${failure.diagnostics.request_id}` : ''})` : ''}\n`);
     return failure.exitCode;
   }
 }

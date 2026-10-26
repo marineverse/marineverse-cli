@@ -247,11 +247,11 @@ export class Auth {
     }
   }
 
-  async write(method: 'POST' | 'PATCH' | 'DELETE', path: string, body: unknown, scope: string, budget?: RequestBudget) {
-    const token = await this.accessToken(undefined, budget);
+  async write(method: 'POST' | 'PATCH' | 'DELETE', path: string, body: unknown, scope: string) {
+    const token = await this.accessToken();
     await this.requireScope(scope);
     return request(`${this.environment.apiUrl}${path}`, { method,
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, REQUEST_TIMEOUT_MS, false, budget);
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 
   // Chargeable requests are never replayed, including after a rejected token.
