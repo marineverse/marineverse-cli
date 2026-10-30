@@ -373,6 +373,22 @@ function registerFeatureCommands(program: Command, services: Services): void {
       if (!Object.keys(change).length) usage('Specify --main and/or --jib with a level from 0 to 1.');
       return invoke(command, client => client.updateBoat(uuid, change));
     });
+  const throttle = (value: string) => {
+    const level = Number(value);
+    if (!value.trim() || !Number.isFinite(level) || level < -1 || level > 1) usage('Throttle must be a number from -1 (full astern) to 1 (full ahead).');
+    return level;
+  };
+  tableCommand(boats.command('start-engine <boat-uuid>'), 'boats').description('Start the electric engine (needs battery charge)')
+    .option('--throttle <level>', 'Throttle from -1 (full astern) to 1 (full ahead)')
+    .action((uuid, opts, command) => {
+      const change = { engine_on: true, ...(opts.throttle === undefined ? {} : { engine_throttle: throttle(opts.throttle) }) };
+      return invoke(command, client => client.updateBoat(uuid, change));
+    });
+  tableCommand(boats.command('stop-engine <boat-uuid>'), 'boats').description('Stop the electric engine')
+    .action((uuid, _opts, command) => invoke(command, client => client.updateBoat(uuid, { engine_on: false })));
+  tableCommand(boats.command('set-throttle <boat-uuid>'), 'boats').description('Set the engine throttle')
+    .requiredOption('--level <level>', 'Throttle from -1 (full astern) to 1 (full ahead)')
+    .action((uuid, opts, command) => invoke(command, client => client.updateBoat(uuid, { engine_throttle: throttle(opts.level) })));
   tableCommand(boats.command('rename <boat-uuid>'), 'boats').requiredOption('--name <name>').description('Rename your boat (Sailing Pass required; sends the existing rename notification)')
     .action((uuid, opts, command) => {
       const name = opts.name.replace(/\s+/g, ' ').trim();

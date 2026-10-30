@@ -837,6 +837,37 @@ test('anchor commands send the chain out and show the saved anchor', async () =>
   assert.deepEqual(JSON.parse(requests.at(-1).body), { rode_m: 0 });
   assert.equal(lifted.json().data.boat.anchor, null);
 });
+// Added by AI - Main use case: engine commands go through the normal boat update and show engine, throttle and battery.
+test('engine commands update the engine through the boat update', async () => {
+  await signedIn();
+  currentBoat.battery_capacity_wh = 25000; currentBoat.battery_energy_wh = 18000;
+  for (const [args, expected] of [
+    [['start-engine', 'boat-key'], { engine_on: true }],
+    [['start-engine', 'boat-key', '--throttle', '0.6'], { engine_on: true, engine_throttle: 0.6 }],
+    [['set-throttle', 'boat-key', '--level', '-0.4'], { engine_throttle: -0.4 }],
+    [['stop-engine', 'boat-key'], { engine_on: false }],
+  ]) {
+    requests = [];
+    const result = await cli('globe', 'boats', ...args, '--json');
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(requests.map(r => [r.method, r.path]), [['PATCH', '/api/v3/globe_boats/boat-key'], ['GET', '/api/v3/globe_boats/boat-key']]);
+    assert.deepEqual(JSON.parse(requests[0].body), { boat: expected });
+    assert.equal(result.json().data.verified, true);
+  }
+  const table = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,engine,throttle,battery');
+  assert.match(table.stdout, /ENGINE\s+THROTTLE\s+BATTERY \(%\)/);
+  assert.match(table.stdout, /Boat\s+false\s+-0\.4\s+72/);
+});
+// Added by AI - Edge case: throttle outside -1..1 is refused before any request.
+test('invalid throttle fails before any request', async () => {
+  await signedIn();
+  requests = [];
+  for (const args of [['set-throttle', 'boat-key', '--level', '1.1'], ['set-throttle', 'boat-key', '--level', 'junk'], ['set-throttle', 'boat-key'],
+    ['start-engine', 'boat-key', '--throttle', '-2']]) {
+    assert.equal((await cli('globe', 'boats', ...args, '--json')).code, 2);
+  }
+  assert.equal(requests.length, 0);
+});
 // Added by AI - Edge case: chain lengths outside 1–60 m are refused before any request.
 test('invalid chain lengths fail before any request', async () => {
   await signedIn();

@@ -9,7 +9,8 @@ const coordinate = (value: unknown) => typeof value === 'number' && Number.isFin
 const boatColumns: [string, (row: any) => unknown][] = [['BOAT UUID', b => b.uuid], ['NAME', b => b.name], ['LATITUDE (°)', b => coordinate(b.latitude)], ['LONGITUDE (°)', b => coordinate(b.longitude)], ['HEADING (°)', b => rounded(b.heading)], ['SPEED (kn)', b => rounded(b.last_speed_kts ?? b.last_speed_in_kts)], ['LOCATION', b => b.location_name], ['MAIN', b => b.mainsail_hoist], ['JIB', b => b.jib_hoist], ['ANCHORED', b => b.is_anchored],
   ['WIND (kn)', b => rounded(b.weather_now?.wind_speed_kn)], ['WIND DIR (°)', b => rounded(b.weather_now?.wind_direction_deg)], ['CURRENT (kn)', b => rounded(b.weather_now?.current_speed_kn)],
   ['WAVE (m)', b => rounded(b.weather_now?.wave_height_m)], ['UPDATED (s ago)', b => b.time_since_last_update_seconds], ['IN PORT', b => b.in_port], ['OWNER', b => b.owner?.name],
-  ['RODE (m)', b => b.anchor?.rode_m], ['DEPTH (m)', b => rounded(b.anchor?.depth_m)]];
+  ['RODE (m)', b => b.anchor?.rode_m], ['DEPTH (m)', b => rounded(b.anchor?.depth_m)], ['ENGINE', b => b.engine_on], ['THROTTLE', b => b.engine_throttle],
+  ['BATTERY (%)', b => typeof b.battery_energy_wh === 'number' && b.battery_capacity_wh ? Math.round(b.battery_energy_wh / b.battery_capacity_wh * 100) : null]];
 const leaderboardColumns: [string, (row: any) => unknown][] = [['POS', e => e.position], ['BOAT UUID', e => e.boat.uuid], ['BOAT', e => e.boat.name], ['LATITUDE (°)', e => coordinate(e.boat.latitude)], ['LONGITUDE (°)', e => coordinate(e.boat.longitude)], ['STATE', e => e.state], ['DISTANCE (nm)', e => rounded(e.distanceToDestination)], ['RACE TIME (s)', e => rounded(e.raceTimeSeconds)], ['PENALTY (s)', e => e.penaltySeconds]];
 const historyColumns: Record<'logs' | 'port-calls' | 'passages', [string, (row: any) => unknown][]> = {
   logs: [['TIME (UTC)', l => l.timestamp], ['LATITUDE (°)', l => coordinate(l.latitude)], ['LONGITUDE (°)', l => coordinate(l.longitude)], ['HEADING (°)', l => rounded(l.heading)],
@@ -23,7 +24,7 @@ const tutorialColumns:[string, (row: any) => unknown][] = [['TUTORIAL', r => r.n
 const distanceColumns: [string, (row: any) => unknown][] = [['BOAT TYPE', r => r.boat_type], ['DISTANCE (nm)', r => rounded(r.total_distance_nm)], ['TIME (min)', r => rounded(r.total_time_minutes)]];
 export const columnNames = {
   ...racingColumnNames,
-  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port', 'owner', 'rode', 'depth'],
+  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port', 'owner', 'rode', 'depth', 'engine', 'throttle', 'battery'],
   races: ['key', 'name', 'state', 'start'],
   leaderboard: ['position', 'uuid', 'name', 'latitude', 'longitude', 'state', 'distance', 'race-time', 'penalty'],
   tutorials: ['name', 'status', 'started', 'finished'],
