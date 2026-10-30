@@ -378,17 +378,17 @@ function registerFeatureCommands(program: Command, services: Services): void {
     if (!value.trim() || !Number.isFinite(level) || level < -1 || level > 1) usage('Throttle must be a number from -1 (full astern) to 1 (full ahead).');
     return level;
   };
-  tableCommand(boats.command('start-engine <boat-uuid>'), 'boats').description('Start the electric engine (needs battery charge)')
+  tableCommand(boats.command('start-motor <boat-uuid>').alias('start-engine'), 'boats').description('Start the electric motor (needs battery charge)')
     .option('--throttle <level>', 'Throttle from -1 (full astern) to 1 (full ahead)')
     .action((uuid, opts, command) => {
-      const change = { engine_on: true, ...(opts.throttle === undefined ? {} : { engine_throttle: throttle(opts.throttle) }) };
+      const change = { motor_on: true, ...(opts.throttle === undefined ? {} : { motor_throttle: throttle(opts.throttle) }) };
       return invoke(command, client => client.updateBoat(uuid, change));
     });
-  tableCommand(boats.command('stop-engine <boat-uuid>'), 'boats').description('Stop the electric engine')
-    .action((uuid, _opts, command) => invoke(command, client => client.updateBoat(uuid, { engine_on: false })));
-  tableCommand(boats.command('set-throttle <boat-uuid>'), 'boats').description('Set the engine throttle')
+  tableCommand(boats.command('stop-motor <boat-uuid>').alias('stop-engine'), 'boats').description('Stop the electric motor')
+    .action((uuid, _opts, command) => invoke(command, client => client.updateBoat(uuid, { motor_on: false })));
+  tableCommand(boats.command('set-throttle <boat-uuid>'), 'boats').description('Set the motor throttle')
     .requiredOption('--level <level>', 'Throttle from -1 (full astern) to 1 (full ahead)')
-    .action((uuid, opts, command) => invoke(command, client => client.updateBoat(uuid, { engine_throttle: throttle(opts.level) })));
+    .action((uuid, opts, command) => invoke(command, client => client.updateBoat(uuid, { motor_throttle: throttle(opts.level) })));
   tableCommand(boats.command('rename <boat-uuid>'), 'boats').requiredOption('--name <name>').description('Rename your boat (Sailing Pass required; sends the existing rename notification)')
     .action((uuid, opts, command) => {
       const name = opts.name.replace(/\s+/g, ' ').trim();

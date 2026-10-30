@@ -9,7 +9,7 @@ const coordinate = (value: unknown) => typeof value === 'number' && Number.isFin
 const boatColumns: [string, (row: any) => unknown][] = [['BOAT UUID', b => b.uuid], ['NAME', b => b.name], ['LATITUDE (°)', b => coordinate(b.latitude)], ['LONGITUDE (°)', b => coordinate(b.longitude)], ['HEADING (°)', b => rounded(b.heading)], ['SPEED (kn)', b => rounded(b.last_speed_kts ?? b.last_speed_in_kts)], ['LOCATION', b => b.location_name], ['MAIN', b => b.mainsail_hoist], ['JIB', b => b.jib_hoist], ['ANCHORED', b => b.is_anchored],
   ['WIND (kn)', b => rounded(b.weather_now?.wind_speed_kn)], ['WIND DIR (°)', b => rounded(b.weather_now?.wind_direction_deg)], ['CURRENT (kn)', b => rounded(b.weather_now?.current_speed_kn)],
   ['WAVE (m)', b => rounded(b.weather_now?.wave_height_m)], ['UPDATED (s ago)', b => b.time_since_last_update_seconds], ['IN PORT', b => b.in_port], ['OWNER', b => b.owner?.name],
-  ['RODE (m)', b => b.anchor?.rode_m], ['DEPTH (m)', b => rounded(b.anchor?.depth_m)], ['ENGINE', b => b.engine_on], ['THROTTLE', b => b.engine_throttle],
+  ['RODE (m)', b => b.anchor?.rode_m], ['DEPTH (m)', b => rounded(b.anchor?.depth_m)], ['MOTOR', b => b.motor_on], ['THROTTLE', b => b.motor_throttle],
   ['BATTERY (%)', b => typeof b.battery_energy_wh === 'number' && b.battery_capacity_wh ? Math.round(b.battery_energy_wh / b.battery_capacity_wh * 100) : null]];
 const leaderboardColumns: [string, (row: any) => unknown][] = [['POS', e => e.position], ['BOAT UUID', e => e.boat.uuid], ['BOAT', e => e.boat.name], ['LATITUDE (°)', e => coordinate(e.boat.latitude)], ['LONGITUDE (°)', e => coordinate(e.boat.longitude)], ['STATE', e => e.state], ['DISTANCE (nm)', e => rounded(e.distanceToDestination)], ['RACE TIME (s)', e => rounded(e.raceTimeSeconds)], ['PENALTY (s)', e => e.penaltySeconds]];
 const historyColumns: Record<'logs' | 'port-calls' | 'passages', [string, (row: any) => unknown][]> = {
@@ -24,17 +24,19 @@ const tutorialColumns:[string, (row: any) => unknown][] = [['TUTORIAL', r => r.n
 const distanceColumns: [string, (row: any) => unknown][] = [['BOAT TYPE', r => r.boat_type], ['DISTANCE (nm)', r => rounded(r.total_distance_nm)], ['TIME (min)', r => rounded(r.total_time_minutes)]];
 export const columnNames = {
   ...racingColumnNames,
-  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port', 'owner', 'rode', 'depth', 'engine', 'throttle', 'battery'],
+  boats: ['uuid', 'name', 'latitude', 'longitude', 'heading', 'speed', 'location', 'main', 'jib', 'anchored', 'wind', 'wind-dir', 'current', 'wave', 'update-age', 'in-port', 'owner', 'rode', 'depth', 'motor', 'throttle', 'battery'],
   races: ['key', 'name', 'state', 'start'],
   leaderboard: ['position', 'uuid', 'name', 'latitude', 'longitude', 'state', 'distance', 'race-time', 'penalty'],
   tutorials: ['name', 'status', 'started', 'finished'],
   distance: ['boat', 'distance', 'time'],
 };
 export type TableKind = keyof typeof columnNames;
+// Column names kept from earlier releases.
+const columnAliases: Partial<Record<TableKind, Record<string, string>>> = { boats: { engine: 'motor' } };
 
 export function validateColumns(kind: TableKind, requested?: string): string[] | undefined {
   if (requested === undefined) return undefined;
-  const columns = requested.split(',').map(value => value.trim());
+  const columns = requested.split(',').map(value => value.trim()).map(value => columnAliases[kind]?.[value] ?? value);
   if (columns.some(value => !columnNames[kind].includes(value)) || new Set(columns).size !== columns.length) {
     usage(`Choose unique column names from: ${columnNames[kind].join(', ')}.`);
   }

@@ -403,11 +403,11 @@ For device login, open the printed URL on any device, sign in, check that the co
 
 `--no-browser` prevents opening a browser; it does not select the login method. Scripts and `--json` never prompt, so pass `--device-auth` for remote login. The CLI never asks for your MarineVerse password.
 
-Heading, sail, engine and anchor changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
+Heading, sail, motor and anchor changes require owner, skipper, or admin crew access. Rename requires the owner and a Sailing Pass, and uses the existing rename notification behavior. Updates are read back: `update_accepted` reports acceptance and `verified` reports whether the requested state was observed. An anchored boat can turn with the wind after accepting a heading; another controller can also change state. A readback is not proof of execution by a running game client.
 
 `boats list --followed` lists the active boats you follow, newest activity first (up to 100). JSON includes each boat's `owner`, `approved`, and `profile_url`; add `--columns name,owner,latitude,longitude,update-age` to show the owner in the table. `boats list` takes exactly one of `--mine` or `--followed`. `follow` and `unfollow` take a boat UUID from command output, such as a leaderboard. Only public boats can be followed from the CLI; to follow a private owner's boat, use the owner's invite link on the website. You cannot follow your own boats.
 
-### Sails, engine and anchoring
+### Sails, motor and anchoring
 
 ```sh
 marineverse globe boats raise-sails BOAT_UUID
@@ -416,17 +416,17 @@ marineverse globe boats lower-sails BOAT_UUID
 marineverse globe boats drop-anchor BOAT_UUID --rode 20
 marineverse globe boats set-rode BOAT_UUID --meters 10
 marineverse globe boats retrieve-anchor BOAT_UUID
-marineverse globe boats start-engine BOAT_UUID --throttle 0.6
+marineverse globe boats start-motor BOAT_UUID --throttle 0.6
 marineverse globe boats set-throttle BOAT_UUID --level -0.3
-marineverse globe boats stop-engine BOAT_UUID
-marineverse globe boats show BOAT_UUID --columns name,latitude,longitude,main,jib,anchored,rode,depth,engine,throttle,battery
+marineverse globe boats stop-motor BOAT_UUID
+marineverse globe boats show BOAT_UUID --columns name,latitude,longitude,main,jib,anchored,rode,depth,motor,throttle,battery
 ```
 
-Sail levels range from `0` (fully lowered) to `1` (fully raised). `set-sails` changes only the sails you specify. With both sails lowered the boat holds its position; `raise-sails` resumes sailing. Sail and engine commands send one update, then read back the result; `--json` includes the requested change and verification status.
+Sail levels range from `0` (fully lowered) to `1` (fully raised). `set-sails` changes only the sails you specify. With both sails lowered the boat holds its position; `raise-sails` resumes sailing. Sail and motor commands send one update, then read back the result; `--json` includes the requested change and verification status.
 
 `drop-anchor` drops the anchor where the boat is and lets out 5 m of chain unless you pass `--rode` (1–60 m). Anchoring works near the shore; the server refuses positions that are too far from shore, on land, or on a reef. `set-rode` lets chain out or takes it in: the boat can swing around the anchor as far as the chain beyond the water depth allows, and taking chain in pulls it toward the anchor. `retrieve-anchor` lifts it. Boat JSON includes `anchor` (`latitude`, `longitude`, `rode_m`, `depth_m`) or `null`. Depth is simulated, not navigation-grade bathymetry.
 
-The boat has an electric engine. Throttle ranges from `-1` (full astern) to `1` (full ahead); `start-engine` keeps the current throttle unless you pass `--throttle`. The engine runs on the battery, which charges from the sun, from the propeller while sailing and from shore power in port. It cannot start with an empty battery (`battery_empty`) and stops when the battery runs out. Boat JSON includes `engine_on`, `engine_throttle`, `battery_energy_wh` and `battery_capacity_wh`.
+The boat has an electric motor. Throttle ranges from `-1` (full astern) to `1` (full ahead); `start-motor` keeps the current throttle unless you pass `--throttle`. The motor runs on the battery, which charges from the sun, from the propeller while sailing and from shore power in port. It cannot start with an empty battery (`battery_empty`) and stops when the battery runs out. Boat JSON includes `motor_on`, `motor_throttle`, `battery_energy_wh` and `battery_capacity_wh`. `start-engine` and `stop-engine` remain as aliases.
 
 `marineverse login` is also available as a shortcut for `marineverse auth login`, with the same options.
 

@@ -25,12 +25,17 @@ function identifier(value: string): string {
 }
 export function boat(value: any) {
   const data = pick(value, ['uuid', 'name', 'heading', 'location_name', 'latitude', 'longitude', 'p_lat', 'p_lng', 'last_speed_kts', 'last_speed_in_kts', 'mainsail_hoist', 'jib_hoist', 'is_anchored', 'is_owner', 'is_crew',
-    'awa', 'time_since_last_update_seconds', 'in_port', 'crew_role', 'weather_now', 'anchor', 'engine_on', 'engine_throttle', 'battery_capacity_wh', 'battery_energy_wh']);
+    'awa', 'time_since_last_update_seconds', 'in_port', 'crew_role', 'weather_now', 'anchor', 'battery_capacity_wh', 'battery_energy_wh']);
   if (typeof data.uuid !== 'string') throw new CliError('INVALID_RESPONSE', 'Boat response is missing its UUID.');
   data.latitude = data.latitude ?? data.p_lat ?? null;
   data.longitude = data.longitude ?? data.p_lng ?? null;
   data.mainsail_hoist = data.mainsail_hoist ?? value.mainsail_hoist_level ?? null;
   data.jib_hoist = data.jib_hoist ?? value.jib_hoist_level ?? null;
+  data.motor_on = value.motor_on ?? value.engine_on;
+  data.motor_throttle = value.motor_throttle ?? value.engine_throttle;
+  // engine_* kept in output for scripts written against earlier releases.
+  data.engine_on = data.motor_on;
+  data.engine_throttle = data.motor_throttle;
   return data;
 }
 function raceSummary(value: any) {
@@ -208,7 +213,7 @@ export class MarineVerseClient {
     return { uuid: result.uuid, type: options.type, items: array(result.items).map(item), next_cursor: result.next_cursor ?? null,
       ...pick(result, ['oldest_available_at']) };
   }
-  async updateBoat(uuid: string, change: { heading?: number; name?: string; mainsail_hoist?: number; jib_hoist?: number; engine_on?: boolean; engine_throttle?: number }) {
+  async updateBoat(uuid: string, change: { heading?: number; name?: string; mainsail_hoist?: number; jib_hoist?: number; motor_on?: boolean; motor_throttle?: number }) {
     const path = `/api/v3/globe_boats/${identifier(uuid)}`;
     const accepted = boat((await request(`${this.environment.apiUrl}${path}`, { method: 'PATCH',
       headers: { Authorization: `Bearer ${await this.auth.accessToken()}`, 'Content-Type': 'application/json' },

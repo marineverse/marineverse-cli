@@ -837,15 +837,17 @@ test('anchor commands send the chain out and show the saved anchor', async () =>
   assert.deepEqual(JSON.parse(requests.at(-1).body), { rode_m: 0 });
   assert.equal(lifted.json().data.boat.anchor, null);
 });
-// Added by AI - Main use case: engine commands go through the normal boat update and show engine, throttle and battery.
-test('engine commands update the engine through the boat update', async () => {
+// Added by AI - Main use case: motor commands go through the normal boat update and show motor, throttle and battery.
+test('motor commands update the motor through the boat update', async () => {
   await signedIn();
   currentBoat.battery_capacity_wh = 25000; currentBoat.battery_energy_wh = 18000;
   for (const [args, expected] of [
-    [['start-engine', 'boat-key'], { engine_on: true }],
-    [['start-engine', 'boat-key', '--throttle', '0.6'], { engine_on: true, engine_throttle: 0.6 }],
-    [['set-throttle', 'boat-key', '--level', '-0.4'], { engine_throttle: -0.4 }],
-    [['stop-engine', 'boat-key'], { engine_on: false }],
+    [['start-motor', 'boat-key'], { motor_on: true }],
+    [['start-motor', 'boat-key', '--throttle', '0.6'], { motor_on: true, motor_throttle: 0.6 }],
+    [['start-engine', 'boat-key', '--throttle', '0.5'], { motor_on: true, motor_throttle: 0.5 }],
+    [['stop-engine', 'boat-key'], { motor_on: false }],
+    [['set-throttle', 'boat-key', '--level', '-0.4'], { motor_throttle: -0.4 }],
+    [['stop-motor', 'boat-key'], { motor_on: false }],
   ]) {
     requests = [];
     const result = await cli('globe', 'boats', ...args, '--json');
@@ -854,16 +856,36 @@ test('engine commands update the engine through the boat update', async () => {
     assert.deepEqual(JSON.parse(requests[0].body), { boat: expected });
     assert.equal(result.json().data.verified, true);
   }
-  const table = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,engine,throttle,battery');
-  assert.match(table.stdout, /ENGINE\s+THROTTLE\s+BATTERY \(%\)/);
+  const table = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,motor,throttle,battery');
+  assert.match(table.stdout, /MOTOR\s+THROTTLE\s+BATTERY \(%\)/);
   assert.match(table.stdout, /Boat\s+false\s+-0\.4\s+72/);
+  const legacy = await cli('globe', 'boats', 'show', 'boat-key', '--columns', 'name,engine');
+  assert.match(legacy.stdout, /MOTOR/);
+});
+// Added by AI - Edge case: a server that only sends engine_* fields still shows the motor state.
+test('boat motor state falls back to engine fields', async () => {
+  await signedIn();
+  Object.assign(currentBoat, { engine_on: true, engine_throttle: 0.3 });
+  const result = await cli('globe', 'boats', 'show', 'boat-key', '--json');
+  assert.equal(result.json().data.boat.motor_on, true);
+  assert.equal(result.json().data.boat.motor_throttle, 0.3);
+});
+// Added by AI - Edge case: --json keeps engine_* alongside motor_* for existing scripts.
+test('boat JSON includes motor and engine keys with the same values', async () => {
+  await signedIn();
+  Object.assign(currentBoat, { motor_on: true, motor_throttle: -0.2 });
+  const { boat } = (await cli('globe', 'boats', 'show', 'boat-key', '--json')).json().data;
+  assert.equal(boat.motor_on, true);
+  assert.equal(boat.engine_on, true);
+  assert.equal(boat.motor_throttle, -0.2);
+  assert.equal(boat.engine_throttle, -0.2);
 });
 // Added by AI - Edge case: throttle outside -1..1 is refused before any request.
 test('invalid throttle fails before any request', async () => {
   await signedIn();
   requests = [];
   for (const args of [['set-throttle', 'boat-key', '--level', '1.1'], ['set-throttle', 'boat-key', '--level', 'junk'], ['set-throttle', 'boat-key'],
-    ['start-engine', 'boat-key', '--throttle', '-2']]) {
+    ['start-motor', 'boat-key', '--throttle', '-2']]) {
     assert.equal((await cli('globe', 'boats', ...args, '--json')).code, 2);
   }
   assert.equal(requests.length, 0);

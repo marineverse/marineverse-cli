@@ -24,7 +24,7 @@ Read only the reference needed for the task:
 - FAQs, sailing glossary, product releases, links and Discord: [public content](references/public-content.md).
 - Multiplayer, Daily Race Practice and Globe races, entry performance, comparisons, and boat profiles: [racing and profiles](references/races.md).
 - Profile, lessons and lifetime distance: [account data](references/account.md).
-- Requested heading, sails, engine, anchor or rename: [boat controls](references/boat-controls.md).
+- Requested heading, sails, motor, anchor or rename: [boat controls](references/boat-controls.md).
 - Roadmap, posts, comments and votes: [feedback](references/feedback.md).
 - Knowledge base, AI and failures: [limits](references/limits.md).
 
